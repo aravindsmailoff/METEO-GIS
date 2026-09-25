@@ -1,0 +1,81 @@
+# ==============================================================================
+# ANTIGRAVITY — NER LANDSLIDE RISKWATCH & VALHALLA DISASTER ROUTING STACK
+# ==============================================================================
+version: '3.8'
+
+services:
+  # 1. PostGIS Database
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: antigravity_postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ner_landslide
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgis_data:/var/lib/postgresql/data
+      - ./backend/models:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - antigravity_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ner_landslide"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. Valhalla Tile Builder
+  valhalla-builder:
+    image: ghcr.io/valhalla/valhalla:latest
+    container_name: antigravity_valhalla_builder
+    restart: "no"
+    environment:
+      DATA_DIR: /data
+      PBF_URL: https://download.geofabrik.de/asia/india/north-eastern-zone-latest.osm.pbf
+      BUILD_CONCURRENCY: 2
+    volumes:
+      - valhalla_data:/data
+      - ./scripts:/scripts:ro
+    entrypoint: ["/bin/bash", "/scripts/build_tiles.sh"]
+    networks:
+      - antigravity_net
+
+  # 3. FastAPI Backend with pyvalhalla
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: antigravity_backend
+    restart: unless-stopped
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://postgres:postgres@postgis:5432/ner_landslide
+      VALHALLA_CONFIG_PATH: /data/valhalla.json
+      SYSTEM_MODE: LIVE
+    volumes:
+      - valhalla_data:/data:ro
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    networks:
+      - antigravity_net
+    deploy:
+      resources:
+        limits:
+          memory: 1200M
+
+volumes:
+  postgis_data:
+    name: antigravity_postgis_data
+  valhalla_data:
+    name: antigravity_valhalla_data
+
+networks:
+  antigravity_net:
+    name: antigravity_network
+    driver: bridge
