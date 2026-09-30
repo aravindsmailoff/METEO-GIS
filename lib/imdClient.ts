@@ -155,39 +155,46 @@ export async function getIMDBearerToken(): Promise<string | null> {
         return knownActive;
       }
 
-      const res = await fetch(IMD_AUTH_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-        cache: 'no-store',
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2500);
 
-      if (res.ok) {
-        const data = await res.json();
-        const token = data.access_token || data.token || data.jwt;
-        const expiresInSec = typeof data.expires_in === 'number' ? data.expires_in : 3600;
+      try {
+        const res = await fetch(IMD_AUTH_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({ email, password }),
+          signal: controller.signal,
+          cache: 'no-store',
+        });
 
-        if (token) {
-          const tokenObj: PersistentTokenData = {
-            token,
-            expiresAt: Date.now() + (expiresInSec - 120) * 1000,
-          };
-          try {
-            fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenObj, null, 2), 'utf8');
-          } catch {}
-          return token;
+        if (res.ok) {
+          const data = await res.json();
+          const token = data.access_token || data.token || data.jwt;
+          const expiresInSec = typeof data.expires_in === 'number' ? data.expires_in : 3600;
+
+          if (token) {
+            const tokenObj: PersistentTokenData = {
+              token,
+              expiresAt: Date.now() + (expiresInSec - 120) * 1000,
+            };
+            try {
+              fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenObj, null, 2), 'utf8');
+            } catch {}
+            return token;
+          }
+        } else {
+          // Cooldown for 5 minutes on 401 or 429 to avoid hammering IMD's servers
+          authCooldownUntil = Date.now() + 300000;
+          console.warn(`[IMD OAuth] Token generation returned HTTP ${res.status}. Entering 5m cooldown, using fallback cache.`);
         }
-      } else {
-        // Cooldown for 5 minutes on 401 or 429 to avoid hammering IMD's servers
-        authCooldownUntil = Date.now() + 300000;
-        console.warn(`[IMD OAuth] Token generation returned HTTP ${res.status}. Entering 5m cooldown, using fallback cache.`);
+      } finally {
+        clearTimeout(timeout);
       }
     } catch (err) {
       authCooldownUntil = Date.now() + 60000;
-      console.error('[IMD OAuth] Error connecting to token endpoint:', err);
     } finally {
       inFlightAuthPromise = null;
     }
@@ -216,10 +223,14 @@ export async function fetchIMD<T = any>(endpoint: string): Promise<T | null> {
     headers['Authorization'] = `Bearer ${jwtToken}`;
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 3000);
+
   try {
     const url = endpoint.startsWith('http') ? endpoint : `${IMD_API_BASE}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
     const res = await fetch(url, {
       headers,
+      signal: controller.signal,
       cache: 'no-store',
     });
 
@@ -232,37 +243,59 @@ export async function fetchIMD<T = any>(endpoint: string): Promise<T | null> {
       return null;
     }
 
-    console.warn(`[IMD API] ${endpoint} returned HTTP ${res.status}`);
     return null;
   } catch (err) {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-function ensureCacheDir() {
+function getBundledImdData<T>(name: string): T | null {
   try {
-    if (!fs.existsSync(CACHE_DIR)) {
-      fs.mkdirSync(CACHE_DIR, { recursive: true });
+    if (name === 'aws_data') {
+      const mod = require('./data/imd/aws_data.json');
+      return (mod.data || mod) as T;
+    }
+    if (name === 'districtnowcast') {
+      const mod = require('./data/imd/districtnowcast.json');
+      return (mod.data || mod) as T;
+    }
+    if (name === 'districtwarning') {
+      const mod = require('./data/imd/districtwarning.json');
+      return (mod.data || mod) as T;
     }
   } catch {}
+  return null;
 }
 
 function readDiskCache<T>(name: string): { data: T | null; timestamp: number } {
   try {
-    ensureCacheDir();
-    const filePath = path.join(CACHE_DIR, `${name}.json`);
-    if (fs.existsSync(filePath)) {
-      const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-      return { data: raw.data as T, timestamp: raw.timestamp || 0 };
+    const tmpPath = path.join('/tmp', 'imd_cache', `${name}.json`);
+    if (fs.existsSync(tmpPath)) {
+      const raw = JSON.parse(fs.readFileSync(tmpPath, 'utf8'));
+      const data = Array.isArray(raw) ? raw : (raw.data || null);
+      if (data && Array.isArray(data) && data.length > 0) {
+        return { data: data as T, timestamp: raw.timestamp || Date.now() };
+      }
     }
   } catch {}
+
+  const bundled = getBundledImdData<T>(name);
+  if (bundled && Array.isArray(bundled) && bundled.length > 0) {
+    return { data: bundled, timestamp: Date.now() };
+  }
+
   return { data: null, timestamp: 0 };
 }
 
 function writeDiskCache<T>(name: string, data: T) {
   try {
-    ensureCacheDir();
-    const filePath = path.join(CACHE_DIR, `${name}.json`);
+    const tmpDir = path.join('/tmp', 'imd_cache');
+    if (!fs.existsSync(tmpDir)) {
+      fs.mkdirSync(tmpDir, { recursive: true });
+    }
+    const filePath = path.join(tmpDir, `${name}.json`);
     fs.writeFileSync(filePath, JSON.stringify({ data, timestamp: Date.now() }, null, 2), 'utf8');
   } catch {}
 }

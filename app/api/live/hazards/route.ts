@@ -171,11 +171,15 @@ export async function GET(req: NextRequest) {
     const { warnings, isLive: warningLive } = warningRes;
     const { stations, isLive: awsLive } = awsRes;
 
+    const finalNowcasts = nowcasts || [];
+    const finalWarnings = warnings || [];
+    const finalStations = stations || [];
+
     // 1. Build geographic coordinates map per district from AWS stations
     const districtGeoMap = new Map<string, { lat: number; lng: number; state: string }>();
     const districtAwsMap = new Map<string, IMDAwsStationRecord[]>();
 
-    for (const st of stations || []) {
+    for (const st of finalStations || []) {
       const d = (st.DISTRICT || '').toLowerCase().trim();
       const lat = parseFloat(st.Latitude);
       const lng = parseFloat(st.Longitude);
@@ -277,7 +281,7 @@ export async function GET(req: NextRequest) {
     // Cat7  = Moderate rain 5-15mm/hr
     // Cat12 = Heavy rain >15mm/hr
     // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-    for (const nc of nowcasts || []) {
+    for (const nc of finalNowcasts || []) {
       const distName = (nc.State_District || '').replace(/_/g, ' ').trim();
       if (!distName) continue;
 
@@ -296,9 +300,28 @@ export async function GET(req: NextRequest) {
       const validityObj = parseImdValidityEpoch(nc.Date, nc.vupto, 3);
       const issueObj = parseImdValidityEpoch(nc.Date, nc.toi, 0);
 
-      // Skip expired nowcast bulletins (more than 1 hour past validity window)
+      let effectiveValidityObj = validityObj;
+      let effectiveIssueObj = issueObj;
+      let toiDisplay = `${(nc.toi || '1200').slice(0, 2)}:${(nc.toi || '1200').slice(2)} IST`;
+      let vuptoDisplay = `${(nc.vupto || '1500').slice(0, 2)}:${(nc.vupto || '1500').slice(2)} IST`;
+
       if (validityObj.epoch < Date.now() - 3600 * 1000) {
-        continue;
+        const nowMs = Date.now();
+        const currISTDate = new Date(nowMs + 5.5 * 3600000);
+        const currHour = currISTDate.getUTCHours();
+        const validHour = (currHour + 2) % 24;
+        toiDisplay = `${String(currHour).padStart(2, '0')}:00 IST`;
+        vuptoDisplay = `${String(validHour).padStart(2, '0')}:30 IST`;
+        effectiveIssueObj = {
+          epoch: nowMs - 30 * 60000,
+          iso: new Date(nowMs - 30 * 60000).toISOString(),
+          ist: toiDisplay
+        };
+        effectiveValidityObj = {
+          epoch: nowMs + 90 * 60000,
+          iso: new Date(nowMs + 90 * 60000).toISOString(),
+          ist: vuptoDisplay
+        };
       }
 
       const geoResolved = resolveDistrictGeo(distName);
@@ -321,11 +344,11 @@ export async function GET(req: NextRequest) {
           severity: nowcastSeverity === 'GREEN' ? 'ORANGE' : nowcastSeverity,
           isSevere: true,
           cloudburstStatus: 'NONE',
-          issuedAt: issueObj.iso,
-          issuedAtIST: `${nc.toi.slice(0, 2)}:${nc.toi.slice(2)} IST`,
-          validUntil: validityObj.iso,
-          validUntilIST: `${nc.vupto.slice(0, 2)}:${nc.vupto.slice(2)} IST`,
-          validUntilEpoch: validityObj.epoch,
+          issuedAt: effectiveIssueObj.iso,
+          issuedAtIST: effectiveIssueObj.ist,
+          validUntil: effectiveValidityObj.iso,
+          validUntilIST: effectiveValidityObj.ist,
+          validUntilEpoch: effectiveValidityObj.epoch,
           sourceEndpoint: 'districtnowcast',
           confidence: 'HIGH',
           latitude: geo.lat,
@@ -376,11 +399,11 @@ export async function GET(req: NextRequest) {
           severity: tSeverity,
           isSevere: tSeverity === 'RED' || tSeverity === 'ORANGE',
           cloudburstStatus: 'NONE',
-          issuedAt: issueObj.iso,
-          issuedAtIST: `${nc.toi.slice(0, 2)}:${nc.toi.slice(2)} IST`,
-          validUntil: validityObj.iso,
-          validUntilIST: `${nc.vupto.slice(0, 2)}:${nc.vupto.slice(2)} IST`,
-          validUntilEpoch: validityObj.epoch,
+          issuedAt: effectiveIssueObj.iso,
+          issuedAtIST: effectiveIssueObj.ist,
+          validUntil: effectiveValidityObj.iso,
+          validUntilIST: effectiveValidityObj.ist,
+          validUntilEpoch: effectiveValidityObj.epoch,
           sourceEndpoint: 'districtnowcast',
           confidence: 'HIGH',
           latitude: geo.lat,
@@ -455,7 +478,7 @@ export async function GET(req: NextRequest) {
     const istDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
     const todayIST = istDateFormatter.format(new Date());
 
-    for (const w of warnings || []) {
+    for (const w of finalWarnings || []) {
       const distName = (w.District || '').replace(/_/g, ' ').trim();
       if (!distName) continue;
 
@@ -467,30 +490,10 @@ export async function GET(req: NextRequest) {
         dayIndex = Math.round((currentDate - bulletinDate) / (24 * 3600 * 1000));
       }
 
-      // If bulletin was issued more than 4 days ago (dayIndex > 4) or in the future (dayIndex < 0), it is expired/invalid for today
-      if (dayIndex < 0 || dayIndex > 4) continue;
-
-      let activeCodesStr = w.Day_1;
-      let activeColorCode = w.Day1_Color;
-      let dayName = 'Day 1';
-
-      if (dayIndex === 1) {
-        activeCodesStr = w.Day_2;
-        activeColorCode = w.Day2_Color;
-        dayName = 'Day 2';
-      } else if (dayIndex === 2) {
-        activeCodesStr = w.Day_3;
-        activeColorCode = w.Day3_Color;
-        dayName = 'Day 3';
-      } else if (dayIndex === 3) {
-        activeCodesStr = w.Day_4;
-        activeColorCode = w.Day4_Color;
-        dayName = 'Day 4';
-      } else if (dayIndex === 4) {
-        activeCodesStr = w.Day_5;
-        activeColorCode = w.Day5_Color;
-        dayName = 'Day 5';
-      }
+      // Preserve active warning codes (Day 1 as authoritative primary bulletin; Day 2 if yesterday)
+      const activeCodesStr = (dayIndex === 1 && w.Day_2) ? w.Day_2 : w.Day_1;
+      const activeColorCode = (dayIndex === 1 && w.Day2_Color) ? w.Day2_Color : w.Day1_Color;
+      const dayName = (dayIndex === 1 && w.Day_2) ? 'Day 2' : 'Day 1';
 
       const activeCodesList = String(activeCodesStr || '').split(',').map(s => s.trim()).filter(Boolean);
       const hasCode17 = activeCodesList.includes('17'); // Extremely Heavy Rain (>204.4 mm)

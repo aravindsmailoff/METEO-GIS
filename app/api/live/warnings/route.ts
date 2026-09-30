@@ -84,14 +84,16 @@ export async function GET(req: NextRequest) {
     ]);
     const { warnings, lastFetched, isLive } = warningRes;
 
-    if (!warnings || warnings.length === 0) {
+    const finalWarnings = warnings || [];
+
+    if (!finalWarnings || finalWarnings.length === 0) {
       return NextResponse.json({
         status: 'UNAVAILABLE',
         message: 'Official IMD District Warning feed temporarily unavailable',
         lastSuccessfulFetch: lastFetched ? new Date(lastFetched).toISOString() : null,
         warnings: [],
         totalCount: 0,
-      }, { status: 503 });
+      }, { status: 200 });
     }
 
     const distCoordsMap = new Map<string, { lat: number; lng: number; state: string }>();
@@ -112,7 +114,7 @@ export async function GET(req: NextRequest) {
     const istDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
     const todayIST = istDateFormatter.format(new Date());
 
-    for (const item of warnings) {
+    for (const item of finalWarnings) {
       const distName = (item.District || '').replace(/_/g, ' ').trim();
       if (!distName) continue;
 
@@ -136,12 +138,8 @@ export async function GET(req: NextRequest) {
       const d4 = parseWarningColor(item.Day4_Color);
       const d5 = parseWarningColor(item.Day5_Color);
 
-      // Determine alert level for TODAY (Day 1..5)
-      const currentLevel = (dayIndex === 1) ? d2
-        : (dayIndex === 2) ? d3
-        : (dayIndex === 3) ? d4
-        : (dayIndex === 4) ? d5
-        : d1;
+      // Preserve active warning colors (Day 1 is primary; if bulletin was yesterday use Day 2)
+      const currentLevel = (dayIndex === 1) ? d2 : d1;
 
       if (alertOnly && currentLevel === 'GREEN') {
         continue;
@@ -158,11 +156,7 @@ export async function GET(req: NextRequest) {
       const lng = coords?.lng ?? geoResolved?.lng;
       const state = coords?.state || geoResolved?.state || '';
 
-      const currentWarningText = (dayIndex === 1) ? decodeImdWarningHazard(item.Day_2)
-        : (dayIndex === 2) ? decodeImdWarningHazard(item.Day_3)
-        : (dayIndex === 3) ? decodeImdWarningHazard(item.Day_4)
-        : (dayIndex === 4) ? decodeImdWarningHazard(item.Day_5)
-        : decodeImdWarningHazard(item.Day_1);
+      const currentWarningText = (dayIndex === 1 ? decodeImdWarningHazard(item.Day_2) : decodeImdWarningHazard(item.Day_1)) || decodeImdWarningHazard(item.Day_1);
 
       validatedList.push({
         objId: item.Obj_id,

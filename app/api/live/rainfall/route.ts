@@ -36,22 +36,25 @@ export async function GET(req: NextRequest) {
 
   try {
     const { stations, lastFetched, isLive } = await getLiveIMDAwsData();
+    const finalStations = stations || [];
 
-    if (!stations || stations.length === 0) {
+    if (!finalStations || finalStations.length === 0) {
       return NextResponse.json({
         status: 'UNAVAILABLE',
         message: 'Official IMD rainfall observation feed temporarily unavailable',
         lastSuccessfulFetch: lastFetched ? new Date(lastFetched).toISOString() : null,
         rainfallPoints: [],
         totalReporting: 0,
-      }, { status: 503 });
+      }, { status: 200 });
     }
 
     const now = new Date();
+    const istDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const todayIST = istDateFormatter.format(now);
     const rainfallPoints: RainfallObservationPoint[] = [];
     const stateBreakdown: Record<string, { totalStations: number; stationsWithRain: number; maxRain24h: number; maxRain1h: number; topStation: string }> = {};
 
-    for (const st of stations) {
+    for (const st of finalStations) {
       const lat = parseFloat(st.Latitude);
       const lng = parseFloat(st.Longitude);
       if (isNaN(lat) || isNaN(lng) || lat < 6.0 || lat > 38.0 || lng < 68.0 || lng > 98.0) continue;

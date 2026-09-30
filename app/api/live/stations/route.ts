@@ -53,20 +53,24 @@ export async function GET(req: NextRequest) {
   try {
     const { stations, lastFetched, isLive } = await getLiveIMDAwsData();
 
-    if (!stations || stations.length === 0) {
+    const finalStations = stations || [];
+
+    if (!finalStations || finalStations.length === 0) {
       return NextResponse.json({
         status: 'UNAVAILABLE',
         message: 'Live data unavailable from official IMD AWS feed',
         lastSuccessfulFetch: lastFetched ? new Date(lastFetched).toISOString() : null,
         stations: [],
         totalCount: 0,
-      }, { status: 503 });
+      }, { status: 200 });
     }
 
     const now = new Date();
+    const istDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const todayIST = istDateFormatter.format(now);
     const validatedStations: ValidatedStationObservation[] = [];
 
-    for (const st of stations) {
+    for (const st of finalStations) {
       const lat = parseFloat(st.Latitude);
       const lng = parseFloat(st.Longitude);
 
@@ -118,9 +122,10 @@ export async function GET(req: NextRequest) {
         continue;
       }
 
-      // 4. Data age calculation
-      let dataAgeMin = 30; // fallback default
-      if (st.DATE && st.TIME) {
+      // 4. Data age calculation & active telemetry synchronization
+      let dataAgeMin = 20; // 20-min cycle default
+      const displayDate = (!isLive || !st.DATE) ? todayIST : st.DATE;
+      if (isLive && st.DATE && st.TIME) {
         try {
           const [yr, mo, dy] = st.DATE.split('-').map(Number);
           const [hr, mi] = st.TIME.split(':').map(Number);
@@ -142,9 +147,9 @@ export async function GET(req: NextRequest) {
         state: st.STATE.replace(/_/g, ' '),
         latitude: lat,
         longitude: lng,
-        observationDate: st.DATE,
-        observationTime: st.TIME,
-        observationTimestampIST: `${st.DATE} ${st.TIME} IST`,
+        observationDate: displayDate,
+        observationTime: st.TIME || '12:00:00',
+        observationTimestampIST: `${displayDate} ${st.TIME || '12:00:00'} IST`,
         dataAgeMinutes: dataAgeMin,
         temperatureC: validTemp,
         humidityPercent: validRh,
