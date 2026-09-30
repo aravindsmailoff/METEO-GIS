@@ -1,0 +1,10 @@
+# Exclude backend and Docker artifacts from Vercel deployment bundle
+backend/
+scripts/
+docker-compose.yml
+.git/
+*.pyc
+__pycache__/
+*.docx
+*.pptx
+scratch/
