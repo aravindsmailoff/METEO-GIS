@@ -116,7 +116,8 @@ export async function GET() {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 1200);
-    const res = await fetch(`${backendUrl}/api/v1/landslides/historical`, {
+    const targetUrl = new URL('/api/v1/landslides/historical', backendUrl);
+    const res = await fetch(targetUrl, {
       signal: controller.signal,
       cache: 'no-store',
     });

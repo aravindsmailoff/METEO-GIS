@@ -23,7 +23,8 @@ export async function POST(req: Request) {
   const timeout = setTimeout(() => controller.abort(), 5000);
 
   try {
-    const res = await fetch(`${backendUrl}/api/v1/sos/cancel`, {
+    const targetUrl = new URL('/api/v1/sos/cancel', backendUrl);
+    const res = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ report_id: reportId }),

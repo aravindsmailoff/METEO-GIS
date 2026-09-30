@@ -16,7 +16,8 @@ export async function POST(req: NextRequest) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 1200);
 
-    const res = await fetch(`${backendUrl}/api/routing/emergency-route`, {
+    const targetUrl = new URL('/api/routing/emergency-route', backendUrl);
+    const res = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

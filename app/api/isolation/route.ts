@@ -126,7 +126,8 @@ export async function GET() {
   const timeout = setTimeout(() => controller.abort(), 2500);
 
   try {
-    const res = await fetch(`${backendUrl}/api/v1/isolation/villages`, {
+    const targetUrl = new URL('/api/v1/isolation/villages', backendUrl);
+    const res = await fetch(targetUrl, {
       signal: controller.signal,
       cache: 'no-store',
     });

@@ -27,7 +27,8 @@ export async function POST(req: Request) {
   const timeout = setTimeout(() => controller.abort(), 5000);
 
   try {
-    const res = await fetch(`${backendUrl}/api/v1/sos`, {
+    const targetUrl = new URL('/api/v1/sos', backendUrl);
+    const res = await fetch(targetUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ latitude, longitude, accuracy_m, reporter_phone, triggered_at_device }),

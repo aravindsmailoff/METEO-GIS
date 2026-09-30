@@ -4,7 +4,8 @@ Comprehensive GIS Command Center, ML Hazard Predictor, and Telemetry Service
 """
 
 import os
-from fastapi import FastAPI, HTTPException, Body
+import httpx
+from fastapi import FastAPI, HTTPException, Body, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
@@ -363,6 +364,41 @@ def simulate_cloudburst(req: CloudburstScenarioRequest):
             for k, v in base_probs.items()
         ]
     }
+
+
+APP_SERVICE_URL = os.getenv("APP_URL", "http://localhost:3000")
+
+@app.api_route("/api/{full_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+async def proxy_unhandled_to_app(full_path: str, request: Request):
+    """
+    Vercel multi-service fallback:
+    When /api/(.*) routes to backend, unhandled /api/* paths (e.g. /api/live/*, /api/bhuvan/*, /api/imd/*)
+    are transparently reverse-proxied to the Next.js app service.
+    """
+    target_url = f"{APP_SERVICE_URL.rstrip('/')}/api/{full_path}"
+    if request.url.query:
+        target_url = f"{target_url}?{request.url.query}"
+    
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in ("host", "content-length")}
+    body = await request.body()
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            resp = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                content=body,
+            )
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers={k: v for k, v in resp.headers.items() if k.lower() not in ("content-encoding", "transfer-encoding", "content-length")},
+                media_type=resp.headers.get("content-type")
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Failed to communicate with app service: {str(e)}")
+
 
 if __name__ == "__main__":
     import uvicorn
