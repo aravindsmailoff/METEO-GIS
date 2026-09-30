@@ -45,7 +45,7 @@ interface UnifiedContextPanelProps {
   handleScenarioChange: (rate: number) => void;
   leadTimeHours: number;
   onOpenSatelliteViewer?: () => void;
-  onOpenRadarViewer?: () => void;
+  onOpenRadarViewer?: (stn?: string) => void;
 }
 
 export const UnifiedContextPanel: React.FC<UnifiedContextPanelProps> = ({
@@ -424,7 +424,7 @@ export const UnifiedContextPanel: React.FC<UnifiedContextPanelProps> = ({
                   <div className="flex items-center gap-2 pt-1 border-t border-[#182535]">
                     {onOpenRadarViewer && (
                       <button
-                        onClick={onOpenRadarViewer}
+                        onClick={() => onOpenRadarViewer(selectedEvidence?.radarObservation?.stationCode)}
                         className="flex-1 py-1.5 rounded text-xs font-mono font-bold text-cyan-300 hover:text-white bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-700 transition-all text-center"
                       >
                         View Radar PPI Scan

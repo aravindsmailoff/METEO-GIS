@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLiveIMDDistrictWarning, getLiveIMDAwsData, IMDDistrictWarningRecord } from '@/lib/imdClient';
+import { resolveDistrictGeo } from '@/lib/indianDistrictCoordinates';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +18,7 @@ export interface ValidatedDistrictWarning {
   day4Color: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED';
   day5Color: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED';
   currentAlertLevel: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED';
+  currentWarning?: string;
   day1Warning: string;
   day2Warning: string;
   day3Warning: string;
@@ -107,6 +109,8 @@ export async function GET(req: NextRequest) {
     }
 
     const validatedList: ValidatedDistrictWarning[] = [];
+    const istDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const todayIST = istDateFormatter.format(new Date());
 
     for (const item of warnings) {
       const distName = (item.District || '').replace(/_/g, ' ').trim();
@@ -118,13 +122,28 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      // Determine day offset between bulletin Date and today in IST
+      let dayIndex = 0;
+      if (item.Date) {
+        const bDate = new Date(`${item.Date}T00:00:00Z`).getTime();
+        const tDate = new Date(`${todayIST}T00:00:00Z`).getTime();
+        dayIndex = Math.round((tDate - bDate) / (24 * 3600 * 1000));
+      }
+
       const d1 = parseWarningColor(item.Day1_Color);
       const d2 = parseWarningColor(item.Day2_Color);
       const d3 = parseWarningColor(item.Day3_Color);
       const d4 = parseWarningColor(item.Day4_Color);
       const d5 = parseWarningColor(item.Day5_Color);
 
-      if (alertOnly && d1 === 'GREEN' && d2 === 'GREEN') {
+      // Determine alert level for TODAY (Day 1..5)
+      const currentLevel = (dayIndex === 1) ? d2
+        : (dayIndex === 2) ? d3
+        : (dayIndex === 3) ? d4
+        : (dayIndex === 4) ? d5
+        : d1;
+
+      if (alertOnly && currentLevel === 'GREEN') {
         continue;
       }
 
@@ -132,12 +151,25 @@ export async function GET(req: NextRequest) {
         distCoordsMap.get(distName.toLowerCase().replace(/\s+/g, '')) ||
         Array.from(distCoordsMap.entries()).find(([k]) => k.includes(distName.toLowerCase()) || distName.toLowerCase().includes(k))?.[1];
 
+      const stateHint = coords?.state || (item as any).State || '';
+      const geoResolved = resolveDistrictGeo(distName, stateHint);
+
+      const lat = coords?.lat ?? geoResolved?.lat;
+      const lng = coords?.lng ?? geoResolved?.lng;
+      const state = coords?.state || geoResolved?.state || '';
+
+      const currentWarningText = (dayIndex === 1) ? decodeImdWarningHazard(item.Day_2)
+        : (dayIndex === 2) ? decodeImdWarningHazard(item.Day_3)
+        : (dayIndex === 3) ? decodeImdWarningHazard(item.Day_4)
+        : (dayIndex === 4) ? decodeImdWarningHazard(item.Day_5)
+        : decodeImdWarningHazard(item.Day_1);
+
       validatedList.push({
         objId: item.Obj_id,
         district: distName,
-        state: coords?.state || '',
-        latitude: coords?.lat,
-        longitude: coords?.lng,
+        state,
+        latitude: lat,
+        longitude: lng,
         date: item.Date,
         updatedAtIST: item.updated_at ? `${item.updated_at} IST` : 'Latest Synoptic Cycle',
         day1Color: d1,
@@ -145,7 +177,8 @@ export async function GET(req: NextRequest) {
         day3Color: d3,
         day4Color: d4,
         day5Color: d5,
-        currentAlertLevel: d1,
+        currentAlertLevel: currentLevel,
+        currentWarning: currentWarningText,
         day1Warning: decodeImdWarningHazard(item.Day_1),
         day2Warning: decodeImdWarningHazard(item.Day_2),
         day3Warning: decodeImdWarningHazard(item.Day_3),

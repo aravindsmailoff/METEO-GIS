@@ -21,7 +21,9 @@ export interface HazardCountdownDetails {
   hazardTitle: string;
   operationalWindowLabel: string;
   isUrgent: boolean;
-  colorScheme: 'red' | 'amber' | 'cyan' | 'purple';
+  colorScheme: 'red' | 'amber' | 'cyan' | 'purple' | 'slate';
+  isCountdownActive: boolean;
+  statusMessage?: string;
 }
 
 export function getHazardCountdownDetails(
@@ -33,13 +35,15 @@ export function getHazardCountdownDetails(
       hrs: 0,
       mins: 0,
       secs: 0,
-      formatted: '00h 00m 00s remaining',
-      clockStr: '00:00:00',
-      hazardBadge: 'MONITORING',
-      hazardTitle: 'OPERATIONAL SURVEILLANCE',
-      operationalWindowLabel: 'No Active Severe Alerts',
+      formatted: '—',
+      clockStr: '--:--:--',
+      hazardBadge: 'ALL CLEAR · NORMAL',
+      hazardTitle: 'STANDARD SYNOPTIC SURVEILLANCE',
+      operationalWindowLabel: 'No Active Severe Alerts Near Area',
       isUrgent: false,
-      colorScheme: 'cyan',
+      colorScheme: 'slate',
+      isCountdownActive: false,
+      statusMessage: 'No active cyclone, severe thunderstorm, cloudburst or hailstorm warning in this area.',
     };
   }
 
@@ -48,6 +52,7 @@ export function getHazardCountdownDetails(
   const summary = String(event.summary || '').toLowerCase();
   const headline = String(event.headline || '').toLowerCase();
   const eventType = String(event.eventType || '').toLowerCase();
+  const sev = String(event.severity || '').toUpperCase();
 
   const isCloudburst =
     cat === 'CLOUDBURST' ||
@@ -81,78 +86,106 @@ export function getHazardCountdownDetails(
     summary.includes('pluvial') ||
     summary.includes('depression basin');
 
-  // 2. Deterministic seed based on location/ID to ensure distinct, authentic time per area
-  const seedString = `${event.district || event.location || 'India'}-${event.category || 'EVENT'}-${event.id || '0'}`;
-  let hash = 0;
-  for (let i = 0; i < seedString.length; i++) {
-    hash = (hash << 5) - hash + seedString.charCodeAt(i);
-    hash |= 0;
-  }
-  const positiveSeed = Math.abs(hash);
+  const isThunderstorm =
+    cat === 'THUNDERSTORM' ||
+    summary.includes('thunderstorm') ||
+    summary.includes('squall') ||
+    summary.includes('lightning') ||
+    headline.includes('thunderstorm') ||
+    headline.includes('squall') ||
+    eventType.includes('thunderstorm');
 
-  // 3. Category-specific operational time windows
-  let totalMinutes = 0;
+  const isSevereWarning =
+    sev === 'RED' ||
+    sev === 'WARNING' ||
+    sev === 'ORANGE' ||
+    sev === 'ALERT' ||
+    event.isSevere === true ||
+    event.isWarningActive === true;
+
+  // STRICT USER RULE:
+  // "A countdown may only be calculated from a real authoritative event time."
+  // Extract genuine authoritative validUntil epoch if available
+  let authEpoch: number | null = null;
+  if (typeof event.validUntilEpoch === 'number' && event.validUntilEpoch > 0) {
+    authEpoch = event.validUntilEpoch;
+  } else if (typeof event.valid_until_epoch === 'number' && event.valid_until_epoch > 0) {
+    authEpoch = event.valid_until_epoch;
+  } else if (event.validUntil && !isNaN(Date.parse(event.validUntil))) {
+    authEpoch = Date.parse(event.validUntil);
+  } else if (event.valid_until && !isNaN(Date.parse(event.valid_until))) {
+    authEpoch = Date.parse(event.valid_until);
+  }
+
+  const remainingMs = authEpoch ? authEpoch - currentTimeMs : 0;
+  const isCountdownActive = Boolean(
+    authEpoch &&
+    remainingMs > 0 &&
+    (isCloudburst || isCyclone || isHail || (isThunderstorm && isSevereWarning) || (isSevereWarning && (sev === 'RED' || sev === 'ORANGE')) || (isSlope && sev === 'RED'))
+  );
+
+  // Category labels and badges
   let hazardBadge = 'STORM WARNING';
   let hazardTitle = 'WARNING COUNTDOWN';
-  let operationalWindowLabel = 'Official IMD Bulletin';
-  let colorScheme: 'red' | 'amber' | 'cyan' | 'purple' = 'amber';
+  let operationalWindowLabel = event.validUntilIST ? `Valid Until ${event.validUntilIST}` : 'Official IMD Bulletin';
+  let colorScheme: 'red' | 'amber' | 'cyan' | 'purple' | 'slate' = 'amber';
 
   if (isCloudburst) {
-    // Cloudburst: Rapid flash-flood & valley surge window (28m to 49m)
-    totalMinutes = 28 + (positiveSeed % 22);
-    hazardBadge = '🚨 CLOUDBURST FLASH-FLOOD';
-    hazardTitle = 'FLASH-FLOOD SURGE & EVACUATION COUNTDOWN';
-    operationalWindowLabel = 'Automated Rain Rate ≥70-100 mm/h · Immediate Response Window';
+    hazardBadge = '⛈️ CLOUDBURST ALERT';
+    hazardTitle = 'CLOUDBURST SURGE & EVACUATION COUNTDOWN';
+    operationalWindowLabel = event.validUntilIST || 'IMD Cloudburst Criterion Window';
     colorScheme = 'red';
   } else if (isCyclone) {
-    // Cyclone: Landfall & coastal surge forecast window (9h to 19h)
-    totalMinutes = 540 + (positiveSeed % 600);
-    hazardBadge = '🌀 CYCLONE LANDFALL ALERT';
-    hazardTitle = 'COASTAL LANDFALL / EYE IMPACT COUNTDOWN';
-    operationalWindowLabel = 'IMD RSMC Tropical Cyclones Division · Landfall Track';
+    hazardBadge = '🌀 CYCLONE WARNING';
+    hazardTitle = 'CYCLONE LANDFALL & SURGE COUNTDOWN';
+    operationalWindowLabel = event.validUntilIST || 'IMD RSMC Tropical Cyclones Bulletin';
     colorScheme = 'red';
   } else if (isHail) {
-    // Hailstorm: Severe convective core lifespan (42m to 1h 18m)
-    totalMinutes = 42 + (positiveSeed % 37);
     hazardBadge = '🧊 HAILSTORM ALERT';
-    hazardTitle = 'MESOCYCLONE HAIL CORE LIFESPAN COUNTDOWN';
-    operationalWindowLabel = 'IMD Radar Cat-17 Convective Core Tracking';
+    hazardTitle = 'CONVECTIVE HAIL CORE LIFESPAN COUNTDOWN';
+    operationalWindowLabel = event.validUntilIST || 'IMD Radar Cat-17 Convective Core Tracking';
     colorScheme = 'purple';
   } else if (isSlope) {
-    // Geotechnical Slope Failure / Highway Corridor Blockage (1h 40m to 3h 15m)
-    totalMinutes = 100 + (positiveSeed % 95);
-    hazardBadge = '⛰️ SLOPE FAILURE RISK';
-    hazardTitle = 'ROAD CLEARANCE & DEFORMATION STABILIZATION';
-    operationalWindowLabel = 'Copernicus InSAR & GSI Geological Hazard Corridor';
+    hazardBadge = '⛰️ LANDSLIDE ADVISORY';
+    hazardTitle = 'ROAD CLEARANCE & DEFORMATION MONITORING';
+    operationalWindowLabel = event.validUntilIST || 'Geological Hazard Surveillance';
     colorScheme = 'amber';
   } else if (isPluvial) {
-    // Pluvial Inundation (1h 15m to 2h 45m)
-    totalMinutes = 75 + (positiveSeed % 90);
-    hazardBadge = '💧 PLUVIAL INUNDATION';
-    hazardTitle = 'DRAINAGE BASIN SURCHARGE COUNTDOWN';
-    operationalWindowLabel = 'DEM Depression Minima Runoff Run · Pluvial Alert';
+    hazardBadge = '🌊 INUNDATION ADVISORY';
+    hazardTitle = 'LOW-LYING INUNDATION COUNTDOWN';
+    operationalWindowLabel = event.validUntilIST || 'Pluvial Runoff Surveillance';
     colorScheme = 'cyan';
-  } else if (event.severity === 'RED') {
-    // Red Alert Severe Thunderstorm / Squall (1h 15m to 2h 55m)
-    totalMinutes = 75 + (positiveSeed % 100);
-    hazardBadge = '🔴 RED ALERT NOWCAST';
+  } else if (sev === 'RED') {
+    hazardBadge = '⚡ SEVERE STORM ALERT';
     hazardTitle = 'SEVERE CONVECTIVE SQUALL IMPACT COUNTDOWN';
-    operationalWindowLabel = 'IMD 3-Hour Doppler Nowcast Surveillance Window';
+    operationalWindowLabel = event.validUntilIST || 'IMD 3-Hour Doppler Nowcast Window';
     colorScheme = 'red';
   } else {
-    // Orange Alert Thunderstorm / Rain (1h 45m to 3h 10m)
-    totalMinutes = 105 + (positiveSeed % 85);
-    hazardBadge = '⚠️ ORANGE ALERT NOWCAST';
+    hazardBadge = '⚡ STORM ALERT';
     hazardTitle = 'DOPPLER NOWCAST VALIDITY COUNTDOWN';
-    operationalWindowLabel = 'IMD Regional Meteorological Centre Nowcast';
+    operationalWindowLabel = event.validUntilIST || 'IMD Regional Meteorological Centre Nowcast';
     colorScheme = 'amber';
   }
 
-  // 4. Anchor window to current hour block so countdown ticks down second by second
-  const anchorHourEpoch = Math.floor(currentTimeMs / 3600000) * 3600000;
-  const targetEpoch = anchorHourEpoch + (totalMinutes * 60 * 1000);
+  // If there is NO active severe warning or no valid future event time:
+  if (!isCountdownActive) {
+    return {
+      hrs: 0,
+      mins: 0,
+      secs: 0,
+      formatted: '—',
+      clockStr: '--:--:--',
+      hazardBadge: 'ALL CLEAR · NORMAL',
+      hazardTitle: 'STANDARD SYNOPTIC SURVEILLANCE',
+      operationalWindowLabel: 'No Active Severe Warning Near Area · Countdown Paused',
+      isUrgent: false,
+      colorScheme: 'slate',
+      isCountdownActive: false,
+      statusMessage: 'Atmospheric conditions within normal thresholds. Doppler countdown triggers upon official IMD severe alert.',
+    };
+  }
 
-  const remainingSec = Math.max(0, Math.floor((targetEpoch - currentTimeMs) / 1000));
+  const remainingSec = Math.max(0, Math.floor(remainingMs / 1000));
   const hrs = Math.floor(remainingSec / 3600);
   const mins = Math.floor((remainingSec % 3600) / 60);
   const secs = remainingSec % 60;
@@ -171,5 +204,6 @@ export function getHazardCountdownDetails(
     operationalWindowLabel,
     isUrgent: hrs === 0 || isCloudburst || isCyclone,
     colorScheme,
+    isCountdownActive: true,
   };
 }

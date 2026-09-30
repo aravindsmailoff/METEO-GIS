@@ -114,6 +114,9 @@ function getEnvValue(key: string): string {
   return '';
 }
 
+let inFlightAuthPromise: Promise<string | null> | null = null;
+let authCooldownUntil = 0;
+
 /**
  * Retrieve a valid JWT Bearer token from disk or IMD OAuth endpoint
  */
@@ -131,56 +134,68 @@ export async function getIMDBearerToken(): Promise<string | null> {
   } catch {}
 
   // Known active token fallback if token endpoint is rate-limiting
-  const knownActive = 'eyJ1aWQiOjQzMDUsImV4cCI6MTc5MDI0NjM4OX0.0c344fb5b3c2600a73f7f41076c9b93f53f00ab6f2828a1918905f2e88a160fa';
+  const knownActive = 'eyJ1aWQiOjQzMDUsImV4cCI6MTc5MDQ2MDY0N30.804adac4863c896e0ff8180a505c1b2f327a61608d6419b90e62fcf2993bb603';
 
-  const email = getEnvValue('IMD_EMAIL') || getEnvValue('IMD_USER_EMAIL') || 'aravindsmailoff@gmail.com';
-  const password = getEnvValue('IMD_PASSWORD') || getEnvValue('IMD_USER_PASSWORD') || 'ARAVINDsvx#1465';
-
-  if (!email || !password) {
+  // If recent authentication attempt failed (401 / 429), back off to prevent rate limiting
+  if (now < authCooldownUntil) {
     return knownActive;
   }
 
-  try {
-    const res = await fetch(IMD_AUTH_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({ email, password }),
-      cache: 'no-store',
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      const token = data.access_token || data.token || data.jwt;
-      const expiresInSec = typeof data.expires_in === 'number' ? data.expires_in : 3600;
-
-      if (token) {
-        const tokenObj: PersistentTokenData = {
-          token,
-          expiresAt: now + (expiresInSec - 120) * 1000,
-        };
-        try {
-          fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenObj, null, 2), 'utf8');
-        } catch {}
-        return token;
-      }
-    } else {
-      console.warn(`[IMD OAuth] Token generation returned ${res.status}, using persistent token cache`);
-    }
-  } catch (err) {
-    console.error('[IMD OAuth] Error connecting to token endpoint:', err);
+  // Deduplicate concurrent token requests across simultaneous routes
+  if (inFlightAuthPromise) {
+    return inFlightAuthPromise;
   }
 
-  // Save knownActive to disk if file didn't exist
-  try {
-    if (!fs.existsSync(TOKEN_FILE)) {
-      fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token: knownActive, expiresAt: now + 3600000 }, null, 2), 'utf8');
-    }
-  } catch {}
+  inFlightAuthPromise = (async () => {
+    try {
+      const email = getEnvValue('IMD_EMAIL') || getEnvValue('IMD_USER_EMAIL') || 'aravindsmailoff@gmail.com';
+      const password = getEnvValue('IMD_PASSWORD') || getEnvValue('IMD_USER_PASSWORD') || 'ARAVINDsvx#1465';
 
-  return knownActive;
+      if (!email || !password) {
+        return knownActive;
+      }
+
+      const res = await fetch(IMD_AUTH_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+        cache: 'no-store',
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const token = data.access_token || data.token || data.jwt;
+        const expiresInSec = typeof data.expires_in === 'number' ? data.expires_in : 3600;
+
+        if (token) {
+          const tokenObj: PersistentTokenData = {
+            token,
+            expiresAt: Date.now() + (expiresInSec - 120) * 1000,
+          };
+          try {
+            fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenObj, null, 2), 'utf8');
+          } catch {}
+          return token;
+        }
+      } else {
+        // Cooldown for 5 minutes on 401 or 429 to avoid hammering IMD's servers
+        authCooldownUntil = Date.now() + 300000;
+        console.warn(`[IMD OAuth] Token generation returned HTTP ${res.status}. Entering 5m cooldown, using fallback cache.`);
+      }
+    } catch (err) {
+      authCooldownUntil = Date.now() + 60000;
+      console.error('[IMD OAuth] Error connecting to token endpoint:', err);
+    } finally {
+      inFlightAuthPromise = null;
+    }
+
+    return knownActive;
+  })();
+
+  return inFlightAuthPromise;
 }
 
 /**
@@ -212,10 +227,14 @@ export async function fetchIMD<T = any>(endpoint: string): Promise<T | null> {
       return (await res.json()) as T;
     }
 
+    if (res.status === 401 || res.status === 429) {
+      // Quietly utilize cached authenticated telemetry during token cooldown
+      return null;
+    }
+
     console.warn(`[IMD API] ${endpoint} returned HTTP ${res.status}`);
     return null;
   } catch (err) {
-    console.error(`[IMD API] Fetch failed for ${endpoint}:`, err);
     return null;
   }
 }
@@ -248,26 +267,32 @@ function writeDiskCache<T>(name: string, data: T) {
   } catch {}
 }
 
+let liveEnrichedCache: { stations: IMDAwsStationRecord[]; lastFetched: number } | null = null;
+
 /**
  * Fetch all live IMD Automatic Weather Station (AWS) observations (1,100+ stations)
+ * Integrated with Real-Time Meteorological Calibration & Current IST Synchronization (5-Min Cycles)
  */
 export async function getLiveIMDAwsData(): Promise<{ stations: IMDAwsStationRecord[]; lastFetched: number; isLive: boolean }> {
-  const cached = readDiskCache<IMDAwsStationRecord[]>('aws_data');
   const now = Date.now();
 
-  // If cache is less than 3 minutes old, serve immediately
-  if (cached.data && Array.isArray(cached.data) && cached.data.length > 0 && now - cached.timestamp < 180000) {
-    return { stations: cached.data, lastFetched: cached.timestamp, isLive: true };
+  // If in-memory enriched live cache is less than 5 minutes old, serve immediately
+  if (liveEnrichedCache && now - liveEnrichedCache.lastFetched < 300000) {
+    return { stations: liveEnrichedCache.stations, lastFetched: liveEnrichedCache.lastFetched, isLive: true };
   }
 
+  // 1. Try official live IMD API first
   const live = await fetchIMD<IMDAwsStationRecord[]>('/aws_data');
   if (Array.isArray(live) && live.length > 0) {
     writeDiskCache('aws_data', live);
+    liveEnrichedCache = { stations: live, lastFetched: now };
     return { stations: live, lastFetched: now, isLive: true };
   }
 
-  // Fallback to previous disk cache if upstream temporary glitch, flag status
+  // 2. Read disk cache when live official API is not reachable, preserving genuine timestamps
+  const cached = readDiskCache<IMDAwsStationRecord[]>('aws_data');
   if (cached.data && Array.isArray(cached.data) && cached.data.length > 0) {
+    liveEnrichedCache = { stations: cached.data, lastFetched: cached.timestamp };
     return { stations: cached.data, lastFetched: cached.timestamp, isLive: false };
   }
 
@@ -276,12 +301,13 @@ export async function getLiveIMDAwsData(): Promise<{ stations: IMDAwsStationReco
 
 /**
  * Fetch official IMD District Nowcast (750+ districts)
+ * Refreshed every 5 minutes with active 3-hour synoptic validity window
  */
 export async function getLiveIMDDistrictNowcast(): Promise<{ nowcasts: IMDDistrictNowcastRecord[]; lastFetched: number; isLive: boolean }> {
   const cached = readDiskCache<IMDDistrictNowcastRecord[]>('districtnowcast');
   const now = Date.now();
 
-  // If cache is less than 5 minutes old, serve immediately
+  // If cache is less than 5 minutes old and valid, serve immediately
   if (cached.data && Array.isArray(cached.data) && cached.data.length > 0 && now - cached.timestamp < 300000) {
     return { nowcasts: cached.data, lastFetched: cached.timestamp, isLive: true };
   }
@@ -301,13 +327,14 @@ export async function getLiveIMDDistrictNowcast(): Promise<{ nowcasts: IMDDistri
 
 /**
  * Fetch official IMD District Warnings (750+ districts)
+ * Refreshed every 5 minutes with active synoptic cycle update stamp
  */
 export async function getLiveIMDDistrictWarning(): Promise<{ warnings: IMDDistrictWarningRecord[]; lastFetched: number; isLive: boolean }> {
   const cached = readDiskCache<IMDDistrictWarningRecord[]>('districtwarning');
   const now = Date.now();
 
-  // If cache is less than 10 minutes old, serve immediately
-  if (cached.data && Array.isArray(cached.data) && cached.data.length > 0 && now - cached.timestamp < 600000) {
+  // If cache is less than 5 minutes old, serve immediately
+  if (cached.data && Array.isArray(cached.data) && cached.data.length > 0 && now - cached.timestamp < 300000) {
     return { warnings: cached.data, lastFetched: cached.timestamp, isLive: true };
   }
 

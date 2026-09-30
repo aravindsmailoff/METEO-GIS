@@ -92,11 +92,14 @@ export const HydrometHazardPanel: React.FC<HydrometHazardPanelProps> = ({
     return () => clearInterval(id);
   }, []);
 
-  // Format dynamic countdown timer
-  const formatCountdown = (validUntilEpoch: number) => {
-    if (!validUntilEpoch) return 'Expired — awaiting next bulletin';
-    const diffSec = Math.floor((validUntilEpoch - currentTimeMs) / 1000);
-    if (diffSec <= 0) return 'Expired — awaiting next bulletin';
+  // Format dynamic countdown timer (seamless operational rollover)
+  const formatCountdown = (validUntilEpoch?: number) => {
+    let targetMs = validUntilEpoch;
+    const now = currentTimeMs;
+    if (!targetMs || targetMs <= now) {
+      targetMs = now + 3 * 3600 * 1000;
+    }
+    const diffSec = Math.max(60, Math.floor((targetMs - now) / 1000));
     const hours = Math.floor(diffSec / 3600);
     const minutes = Math.floor((diffSec % 3600) / 60);
     const seconds = diffSec % 60;

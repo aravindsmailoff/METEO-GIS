@@ -1,74 +1,168 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  Zap, AlertTriangle, Waves, Wind, Compass, ShieldAlert, ArrowRight, CheckCircle2, Clock
+  Zap, AlertTriangle, Waves, Wind, Compass, ShieldAlert, ArrowRight, CheckCircle2, Clock, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { DerivedHazardEvent } from '@/app/api/live/hazards/route';
-
 import { getHazardCountdownDetails } from '@/lib/hazardCountdown';
 
 interface ActiveEventBarProps {
   primaryEvent: DerivedHazardEvent | any | null;
+  availableEvents?: (DerivedHazardEvent | any)[];
   onInspectEvent: (event: any) => void;
   selectedState: string;
 }
 
 export const ActiveEventBar: React.FC<ActiveEventBarProps> = ({
   primaryEvent,
+  availableEvents = [],
   onInspectEvent,
   selectedState,
 }) => {
-  const [currentTimeMs, setCurrentTimeMs] = React.useState<number>(Date.now());
+  const [isMounted, setIsMounted] = useState<boolean>(false);
+  const [currentTimeMs, setCurrentTimeMs] = useState<number>(0);
+  const [activeZoneIndex, setActiveZoneIndex] = useState<number>(0);
 
-  React.useEffect(() => {
+  useEffect(() => {
+    setIsMounted(true);
+    setCurrentTimeMs(Date.now());
     const id = setInterval(() => setCurrentTimeMs(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  if (!primaryEvent) {
+  // Filter available danger zones by selected state if a specific state is selected
+  const activeEventsList = React.useMemo(() => {
+    if (!availableEvents || availableEvents.length === 0) {
+      return primaryEvent ? [primaryEvent] : [];
+    }
+    if (selectedState && selectedState !== 'All India') {
+      const stateFiltered = availableEvents.filter(
+        (e) => e.state && (
+          e.state.toLowerCase().includes(selectedState.toLowerCase()) ||
+          selectedState.toLowerCase().includes(e.state.toLowerCase())
+        )
+      );
+      if (stateFiltered.length > 0) return stateFiltered;
+    }
+    return availableEvents;
+  }, [availableEvents, primaryEvent, selectedState]);
+
+  // Determine current displayed event: user clicked event takes precedence, else active index in list
+  const currentEvent = primaryEvent || activeEventsList[activeZoneIndex % Math.max(1, activeEventsList.length)] || null;
+
+  const handlePrev = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveZoneIndex((prev) => (prev > 0 ? prev - 1 : activeEventsList.length - 1));
+  };
+
+  const handleNext = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setActiveZoneIndex((prev) => (prev + 1) % Math.max(1, activeEventsList.length));
+  };
+
+  const displayEvent = currentEvent;
+  const isSevere = displayEvent?.isSevere || ['RED', 'ORANGE'].includes(displayEvent?.severity);
+  const cd = getHazardCountdownDetails(displayEvent, currentTimeMs);
+  const hasActiveWarning = displayEvent && isSevere && displayEvent.category !== 'MONITORING' && displayEvent.severity !== 'GREEN' && cd.isCountdownActive;
+
+  if (!displayEvent || !hasActiveWarning) {
+    const locName = displayEvent?.district ? `${displayEvent.district}${displayEvent.state ? ` (${displayEvent.state})` : ''}` : selectedState !== 'All India' ? selectedState : 'National Surveillance Sector';
     return (
-      <div className="h-9 bg-slate-950/90 border-b border-slate-800/80 px-4 flex items-center justify-between text-xs text-slate-400 select-none flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <CheckCircle2 size={13} className="text-emerald-400" />
-          <span className="font-medium text-slate-300">
-            Normal Synoptic Status ({selectedState})
-          </span>
-          <span className="text-slate-500">·</span>
-          <span className="text-slate-400">
-            No active Red/Orange convective threats approaching tracked corridors. 1,165 AWS telemetry active.
-          </span>
+      <div className="h-13 border-b px-4 flex items-center justify-between gap-3 text-xs select-none flex-shrink-0 transition-all shadow-md bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 border-slate-800 text-slate-300">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-black tracking-wider uppercase border border-emerald-500/40 bg-emerald-500/20 text-emerald-300">
+            <CheckCircle2 size={14} strokeWidth={2.5} />
+            <span>NORMAL</span>
+            <span>ALL CLEAR</span>
+          </div>
+          <div className="min-w-0">
+            <div className="font-extrabold text-sm text-white tracking-tight truncate flex items-center gap-2">
+              <span>{locName}</span>
+              <span className="px-1.5 py-0.2 rounded text-[9.5px] bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono font-bold uppercase hidden sm:inline">
+                No Active Warning
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-400 truncate">
+              {displayEvent?.district ? `Atmospheric conditions within baseline thresholds for ${displayEvent.district}. No active severe alerts.` : selectedState && selectedState !== 'All India' ? `No severe weather warnings active in ${selectedState}.` : 'Atmospheric conditions within standard baseline across active surveillance sectors.'}
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-[11px] text-slate-400">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-          <span>IMD Nowcast & Radar Monitoring Active</span>
+
+        <div className="flex items-center gap-3 px-4 py-1.5 rounded-xl bg-black/80 border border-slate-700">
+          <div className="flex items-center gap-2">
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+            <div className="flex flex-col items-start leading-none">
+              <span className="text-[9px] uppercase font-black tracking-widest text-slate-400 mb-0.5">
+                DOPPLER SURVEILLANCE
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-mono text-emerald-300 font-bold tracking-wider">
+                  COUNTDOWN INACTIVE
+                </span>
+                <span className="px-1.5 py-0.5 rounded text-[8.5px] font-bold uppercase font-mono tracking-wider bg-slate-800 text-slate-400 border border-slate-700">
+                  NORMAL
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2.5 flex-shrink-0">
+          {availableEvents && availableEvents.length > 0 && (
+            <button
+              onClick={() => onInspectEvent(availableEvents[0])}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/90 hover:bg-red-500 text-white font-extrabold text-xs shadow-md transition-all active:scale-95"
+            >
+              <span>INSPECT ACTIVE ALERT ({availableEvents[0].district})</span>
+              <ArrowRight size={13} strokeWidth={3} />
+            </button>
+          )}
         </div>
       </div>
     );
   }
-
-  const isRed = primaryEvent.severity === 'RED';
-  const isOrange = primaryEvent.severity === 'ORANGE';
-  const isCloudburst = primaryEvent.cloudburstStatus === 'CONFIRMED' || primaryEvent.category === 'CLOUDBURST';
-  const isHail = primaryEvent.category === 'HAIL';
+  const isRed = displayEvent.severity === 'RED';
+  const isCloudburst = displayEvent.cloudburstStatus === 'CONFIRMED' || displayEvent.category === 'CLOUDBURST' || displayEvent.headline?.toLowerCase().includes('cloudburst');
+  const isCyclone = displayEvent.category === 'CYCLONE' || displayEvent.headline?.toLowerCase().includes('cyclon') || displayEvent.summary?.toLowerCase().includes('cyclon');
+  const isHail = displayEvent.category === 'HAIL';
 
   // Hazard Icon
-  const HazardIcon = isCloudburst ? Waves : isHail ? AlertTriangle : Zap;
-
-  // Dynamic Category-Specific Countdown Engine (Cyclone vs Cloudburst vs Thunderstorm vs Hail)
-  const cd = getHazardCountdownDetails(primaryEvent, currentTimeMs);
-
+  const HazardIcon = isCloudburst ? Waves : isCyclone ? Wind : isHail ? AlertTriangle : Zap;
 
   return (
     <div
-      className={`h-13 border-b px-4 flex items-center justify-between gap-4 text-xs select-none flex-shrink-0 transition-all shadow-md ${
+      className={`h-13 border-b px-4 flex items-center justify-between gap-3 text-xs select-none flex-shrink-0 transition-all shadow-md ${
         isRed
           ? 'bg-gradient-to-r from-red-950 via-slate-950 to-red-950 border-red-500/60 text-red-100 shadow-red-950/30'
           : 'bg-gradient-to-r from-amber-950 via-slate-950 to-amber-950 border-amber-500/60 text-amber-100 shadow-amber-950/30'
       }`}
     >
-      {/* ── Left: Hazard Identification & Corridor ────────────────── */}
+      {/* ── Left: Hazard Identification, Zone Switcher & Corridor ── */}
       <div className="flex items-center gap-2.5 min-w-0">
+        {/* Danger Zone Multi-Zone Switcher */}
+        {activeEventsList.length > 1 && (
+          <div className="flex items-center gap-1 bg-black/60 border border-slate-700/80 rounded-lg px-1.5 py-0.5 text-[10px] font-mono flex-shrink-0">
+            <button
+              onClick={handlePrev}
+              className="p-0.5 hover:text-white text-slate-400 hover:bg-slate-800 rounded transition-colors"
+              title="Previous Active Danger Zone"
+            >
+              <ChevronLeft size={13} />
+            </button>
+            <span className="text-amber-400 font-bold px-1 whitespace-nowrap">
+              ZONE {(activeZoneIndex % activeEventsList.length) + 1}/{activeEventsList.length}
+            </span>
+            <button
+              onClick={handleNext}
+              className="p-0.5 hover:text-white text-slate-400 hover:bg-slate-800 rounded transition-colors"
+              title="Next Active Danger Zone"
+            >
+              <ChevronRight size={13} />
+            </button>
+          </div>
+        )}
+
         <div
           className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-black tracking-wider uppercase border flex-shrink-0 shadow-sm ${
             isRed
@@ -77,16 +171,19 @@ export const ActiveEventBar: React.FC<ActiveEventBarProps> = ({
           }`}
         >
           <HazardIcon size={14} strokeWidth={2.5} />
-          <span>{primaryEvent.category}</span>
-          <span>{primaryEvent.severity}</span>
+          <span>{displayEvent.category}</span>
+          <span>{displayEvent.severity}</span>
         </div>
 
         <div className="min-w-0">
-          <div className="font-extrabold text-sm text-white tracking-tight truncate">
-            {primaryEvent.district} ({primaryEvent.state})
+          <div className="font-extrabold text-sm text-white tracking-tight truncate flex items-center gap-2">
+            <span>{displayEvent.district} {displayEvent.state ? `(${displayEvent.state})` : ''}</span>
+            <span className="px-1.5 py-0.2 rounded text-[9.5px] bg-red-500/20 border border-red-500/40 text-red-300 font-mono font-bold uppercase hidden sm:inline">
+              {cd.hazardBadge}
+            </span>
           </div>
           <div className="text-[11px] text-slate-300 truncate">
-            {primaryEvent.categoryLabels?.join(' · ') || primaryEvent.summary}
+            {displayEvent.categoryLabels?.join(' · ') || displayEvent.headline || displayEvent.summary}
           </div>
         </div>
       </div>
@@ -111,8 +208,8 @@ export const ActiveEventBar: React.FC<ActiveEventBarProps> = ({
               {cd.hazardTitle}
             </span>
             <div className="flex items-center gap-2">
-              <span className="text-xl md:text-2xl font-black font-mono text-white tracking-widest tabular-nums drop-shadow-[0_2px_8px_rgba(245,158,11,0.5)]">
-                {cd.clockStr}
+              <span suppressHydrationWarning className="text-xl md:text-2xl font-black font-mono text-white tracking-widest tabular-nums drop-shadow-[0_2px_8px_rgba(245,158,11,0.5)]">
+                {isMounted ? cd.clockStr : '--:--:--'}
               </span>
               <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase font-mono tracking-wider border ${
                 cd.colorScheme === 'red'
@@ -124,24 +221,24 @@ export const ActiveEventBar: React.FC<ActiveEventBarProps> = ({
             </div>
           </div>
         </div>
-        <div className="h-8 w-[1.5px] bg-slate-700/80 hidden sm:block" />
-        <div className="text-[10.5px] text-slate-300 hidden sm:block leading-tight font-medium max-w-xs">
+        <div className="h-8 w-[1.5px] bg-slate-700/80 hidden lg:block" />
+        <div className="text-[10.5px] text-slate-300 hidden lg:block leading-tight font-medium max-w-xs">
           <div className="text-amber-300 font-bold truncate">{cd.hazardBadge}</div>
           <div className="text-slate-400 text-[9.5px] truncate">{cd.operationalWindowLabel}</div>
         </div>
       </div>
 
       {/* ── Right: Provenance & Inspect Action ─────────────────────── */}
-      <div className="flex items-center gap-3 flex-shrink-0">
+      <div className="flex items-center gap-2.5 flex-shrink-0">
         <div className="hidden xl:flex flex-col items-end text-[10px] leading-tight text-slate-400">
           <span>Source Feed</span>
           <span className="font-bold text-slate-200">
-            {primaryEvent.sourceEndpoint || 'IMD Official Bulletin'}
+            {displayEvent.sourceEndpoint || 'IMD Official Bulletin'}
           </span>
         </div>
 
         <button
-          onClick={() => onInspectEvent(primaryEvent)}
+          onClick={() => onInspectEvent(displayEvent)}
           className={`h-9 px-3.5 rounded-lg text-xs font-black tracking-wide flex items-center gap-1.5 border shadow-md transition-all ${
             isRed
               ? 'bg-red-600 hover:bg-red-500 text-white border-red-400 shadow-red-950/50'
@@ -155,3 +252,4 @@ export const ActiveEventBar: React.FC<ActiveEventBarProps> = ({
     </div>
   );
 };
+

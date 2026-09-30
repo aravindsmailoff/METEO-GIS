@@ -77,5 +77,21 @@ npm start
 
 ---
 
+## ⚡ Deploying to Vercel
+
+MeteoGIS is natively architected for zero-config deployment on [Vercel](https://vercel.com):
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Faravindsmailoff%2FMETEO-GIS)
+
+### Deployment Steps:
+1. Push your repository to GitHub.
+2. Sign in to [Vercel Dashboard](https://vercel.com/dashboard) and click **"Add New..." > "Project"**.
+3. Import the `METEO-GIS` repository.
+4. Framework Preset will be automatically detected as **Next.js**.
+5. Configure Environment Variables in Project Settings (refer to [.env.example](.env.example) for recommended variables such as `SYSTEM_MODE=LIVE`, `BHUVAN_TOKEN`, `IMD_API_KEY`, and `GRAPHHOPPER_API_KEY`).
+6. Click **Deploy**. Vercel will build and assign a production HTTPS domain automatically.
+
+---
+
 ## 🔒 Data Integrity & Provenance
 MeteoGIS strictly prioritizes authoritative government and scientific data feeds (IMD, ISRO, NASA, WMO). Synthetic or fabricated predictions are strictly separated from ground observations.

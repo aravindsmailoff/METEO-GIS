@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLiveIMDAwsData, getLiveIMDDistrictNowcast, getLiveIMDDistrictWarning } from '@/lib/imdClient';
+import { getRealtimeIncidents } from '@/lib/realtimeIncidentEngine';
 
 export const dynamic = 'force-dynamic';
 
@@ -220,20 +221,25 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({
-      status: 'OK',
-      totalEventsCount: activeEvents.length,
-      hasActiveSevereEvents: activeEvents.length > 0,
-      summary: activeEvents.length > 0
-        ? `${activeEvents.length} authoritative active severe weather events identified from official IMD feeds.`
-        : 'No active severe weather event detected in available official feeds.',
-      activeEvents,
-      receivedTimestamp: new Date().toISOString(),
-    }, {
-      headers: {
-        'Cache-Control': 'public, max-age=120, stale-while-revalidate=60',
-      },
-    });
+      const { incidents: realtimeIncidents, expiredIncidents, audit } = await getRealtimeIncidents({ state: stateFilter || undefined });
+
+      return NextResponse.json({
+        status: 'OK',
+        totalEventsCount: Math.max(activeEvents.length, realtimeIncidents.length),
+        hasActiveSevereEvents: activeEvents.length > 0 || realtimeIncidents.length > 0,
+        summary: activeEvents.length > 0 || realtimeIncidents.length > 0
+          ? `${Math.max(activeEvents.length, realtimeIncidents.length)} authoritative active severe weather events identified from official IMD feeds.`
+          : 'No active severe weather event detected in available official feeds.',
+        activeEvents,
+        realtimeIncidents,
+        expiredIncidents,
+        audit,
+        receivedTimestamp: new Date().toISOString(),
+      }, {
+        headers: {
+          'Cache-Control': 'public, max-age=120, stale-while-revalidate=60',
+        },
+      });
   } catch (err: any) {
     return NextResponse.json({
       status: 'ERROR',

@@ -29,7 +29,7 @@ interface UnifiedKpiStripProps {
   selectedEvidence?: any | null;
   selectedLiveEvent?: any | null;
   onOpenSatelliteViewer?: () => void;
-  onOpenRadarViewer?: () => void;
+  onOpenRadarViewer?: (stn?: string) => void;
 }
 
 interface LiveWeatherEvent {

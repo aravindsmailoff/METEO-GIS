@@ -29,7 +29,7 @@ interface ConvectiveNowcastTabProps {
   selectedLiveEvent?: any | null;
   leadTimeHours: number;
   onOpenSatelliteViewer?: () => void;
-  onOpenRadarViewer?: () => void;
+  onOpenRadarViewer?: (stn?: string) => void;
 }
 
 export const ConvectiveNowcastTab: React.FC<ConvectiveNowcastTabProps> = ({
@@ -281,7 +281,7 @@ export const ConvectiveNowcastTab: React.FC<ConvectiveNowcastTabProps> = ({
               </span>
               {onOpenRadarViewer && (
                 <button
-                  onClick={onOpenRadarViewer}
+                  onClick={() => onOpenRadarViewer(selectedEvidence?.radarObservation?.stationCode)}
                   className="text-xs font-mono px-2 py-0.5 rounded bg-cyan-950 text-cyan-200 border border-cyan-700 font-bold"
                 >
                   Radar Scan

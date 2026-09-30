@@ -106,6 +106,7 @@ export interface ClickedLocationEvidence {
     dataAgeMinutes: number;
     freshnessStatus: 'LIVE' | 'DELAYED' | 'STALE' | 'UNAVAILABLE';
     isAvailable: boolean;
+    source?: string;
   };
 
   // Official IMD District Nowcast

@@ -100,10 +100,11 @@ export const ConvectiveRadarMap: React.FC<ConvectiveRadarMapProps> = ({
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-      // Basemaps
-      const darkLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      // Basemaps (Watermark-free Esri Dark Gray Canvas)
+      const darkLayer = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
         maxZoom: 19,
         minZoom: 6,
+        attribution: '© Esri, HERE, Garmin',
       });
 
       // ISRO Bhuvan High-Resolution Satellite & CartoSat style layer

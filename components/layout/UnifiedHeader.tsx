@@ -34,7 +34,7 @@ interface UnifiedHeaderProps {
   onToggleDataHealth: () => void;
   onOpenFusionArchitectureModal?: () => void;
   onOpenSatelliteViewer?: () => void;
-  onOpenRadarViewer?: () => void;
+  onOpenRadarViewer?: (stn?: string) => void;
   onOpenSystemOverview?: () => void;
   liveRainCount?: number;
   liveNowcastCount?: number;
@@ -345,7 +345,7 @@ export const UnifiedHeader: React.FC<UnifiedHeaderProps> = ({
         {/* DWR Doppler Radar Viewer Modal */}
         {onOpenRadarViewer && (
           <button
-            onClick={onOpenRadarViewer}
+            onClick={() => onOpenRadarViewer()}
             className="px-2.5 py-1 rounded-lg bg-[#111c2e] hover:bg-[#182842] border border-cyan-500/50 hover:border-cyan-400 text-cyan-200 hover:text-white text-xs font-mono font-bold flex items-center gap-1.5 transition-all shadow-sm"
             title="Inspect Live IMD Doppler Weather Radar Volumetric Scans"
           >

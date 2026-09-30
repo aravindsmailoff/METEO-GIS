@@ -7,10 +7,11 @@ import {
   IMDDistrictWarningRecord, 
   IMDAwsStationRecord 
 } from '@/lib/imdClient';
+import { resolveDistrictGeo } from '@/lib/indianDistrictCoordinates';
 
 export const dynamic = 'force-dynamic';
 
-export type FocusHazardCategory = 'THUNDERSTORM' | 'HAIL' | 'CLOUDBURST' | 'BACKGROUND';
+export type FocusHazardCategory = 'CYCLONE' | 'CLOUDBURST' | 'HAIL' | 'THUNDERSTORM' | 'VERY_HEAVY_RAIN' | 'SEVERE_WEATHER' | 'BACKGROUND';
 export type HazardSeverity = 'RED' | 'ORANGE' | 'YELLOW' | 'GREEN';
 export type CloudburstStatus = 'NONE' | 'ADVISORY' | 'CONFIRMED';
 
@@ -47,6 +48,20 @@ export interface DerivedHazardEvent {
   };
 }
 
+export interface CityHotspotPinpoint {
+  id: string;
+  name: string;
+  category: 'CYCLONE_PRONE_AREA' | 'CLOUDBURST_PRONE_AREA' | 'FLOOD_PRONE_AREA' | 'SEVERE_INUNDATION_AREA' | string;
+  latitude: number;
+  longitude: number;
+  elevationM: number;
+  waterloggingDepthM: number;
+  severity: 'CRITICAL' | 'HIGH' | 'MODERATE';
+  affectedStructures: number;
+  drainageIssue: string;
+  recommendation: string;
+}
+
 export interface PluvialFloodZone {
   id: string;
   zoneName: string;
@@ -64,6 +79,7 @@ export interface PluvialFloodZone {
   freshness: string;
   drainageContext: string;
   estimatedHousesAtRisk: number;
+  cityHotspots?: CityHotspotPinpoint[];
 }
 
 /**
@@ -122,7 +138,7 @@ function parseImdValidityEpoch(dateStr: string, timeStr: string, fallbackHoursAh
       const targetDate = new Date(utcMs);
       return {
         iso: targetDate.toISOString(),
-        ist: `${String(hr).padStart(2, '0')}:${String(min).padStart(2, '0')} IST`,
+        ist: `${targetDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' })} IST`,
         epoch: targetDate.getTime(),
       };
     }
@@ -177,12 +193,12 @@ export async function GET(req: NextRequest) {
     const hazardEvents: DerivedHazardEvent[] = [];
     const processedDistricts = new Set<string>();
 
-    // ──────────────────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // A. CLOUDBURST DETECTION (Derived from AWS Station near-real-time rates)
     // IMD Operational Rule:
     // - Rolling 60-min window rate >= 70 mm/h -> ADVISORY
     // - Rolling 60-min window rate >= 100 mm/h -> CONFIRMED
-    // ──────────────────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     for (const [distKey, stnList] of districtAwsMap.entries()) {
       for (const st of stnList) {
         const r1 = parseFloat(String(st.RAINFALL_SEL || 0)) || 0;
@@ -208,7 +224,7 @@ export async function GET(req: NextRequest) {
             district: distName,
             state: stateName,
             category: 'CLOUDBURST',
-            categoryLabels: isConfirmed ? ['CLOUDBURST CONFIRMED (≥100mm/h)', 'EXTREME FLOOD RISK'] : ['CLOUDBURST ADVISORY (≥70mm/h)', 'RAPID WATERLOGGING'],
+            categoryLabels: isConfirmed ? ['CLOUDBURST CONFIRMED (â‰¥100mm/h)', 'EXTREME FLOOD RISK'] : ['CLOUDBURST ADVISORY (â‰¥70mm/h)', 'RAPID WATERLOGGING'],
             severity: 'RED',
             isSevere: true,
             cloudburstStatus: cbStatus,
@@ -249,7 +265,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // B. NOWCAST INGESTION & TRANSFORMATION (Thunderstorm, Hail, Background)
     // Cat codes:
     // Cat4  = Light Thunderstorm (<40kmph gust)
@@ -260,7 +276,7 @@ export async function GET(req: NextRequest) {
     // Cat2  = Light rain <5mm/hr -> explicitly mapped to "Drizzle"
     // Cat7  = Moderate rain 5-15mm/hr
     // Cat12 = Heavy rain >15mm/hr
-    // ──────────────────────────────────────────────────────────────────────────
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     for (const nc of nowcasts || []) {
       const distName = (nc.State_District || '').replace(/_/g, ' ').trim();
       if (!distName) continue;
@@ -280,9 +296,17 @@ export async function GET(req: NextRequest) {
       const validityObj = parseImdValidityEpoch(nc.Date, nc.vupto, 3);
       const issueObj = parseImdValidityEpoch(nc.Date, nc.toi, 0);
 
-      const geo = districtGeoMap.get(distName.toLowerCase()) || 
-        districtGeoMap.get(distName.toLowerCase().replace(/\s+/g, '')) ||
-        { lat: 26.2006, lng: 92.9376, state: 'India' };
+      // Skip expired nowcast bulletins (more than 1 hour past validity window)
+      if (validityObj.epoch < Date.now() - 3600 * 1000) {
+        continue;
+      }
+
+      const geoResolved = resolveDistrictGeo(distName);
+      const geo = geoResolved
+        ? { lat: geoResolved.lat, lng: geoResolved.lng, state: geoResolved.state }
+        : districtGeoMap.get(distName.toLowerCase()) || 
+          districtGeoMap.get(distName.toLowerCase().replace(/\s+/g, '')) ||
+          { lat: 20.9517, lng: 85.0985, state: 'India' };
 
       // Determine Category
       if (hasCat17) {
@@ -361,7 +385,7 @@ export async function GET(req: NextRequest) {
           confidence: 'HIGH',
           latitude: geo.lat,
           longitude: geo.lng,
-          summary: `IMD Nowcast: ${labels.join(' · ')} in ${distName}.`,
+          summary: `IMD Nowcast: ${labels.join(' Â· ')} in ${distName}.`,
           rawPayload: {
             bulletinType: 'IMD Nowcast Thunderstorm Series',
             cat4: nc.cat4,
@@ -425,28 +449,145 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // C. MULTI-DAY WARNING INGESTION (Code 4=T-Storm, Code 5=Hail)
-    // ──────────────────────────────────────────────────────────────────────────
+    // ───────────────────────────────────────────────────────────────
+    // C. MULTI-DAY WARNING INGESTION (Accurately Mapped to Current Forecast Day)
+    // ───────────────────────────────────────────────────────────────
+    const istDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const todayIST = istDateFormatter.format(new Date());
+
     for (const w of warnings || []) {
       const distName = (w.District || '').replace(/_/g, ' ').trim();
-      if (!distName || processedDistricts.has(distName.toLowerCase())) continue;
+      if (!distName) continue;
 
-      const day1Codes = String(w.Day_1 || '').split(',').map(s => s.trim());
-      const hasCode4 = day1Codes.includes('4'); // Thunderstorm & Lightning / Squall
-      const hasCode5 = day1Codes.includes('5'); // Hailstorm
-      const wColor = parseWarningColor(w.Day1_Color);
+      // Determine day offset between bulletin Date and today in IST
+      let dayIndex = 0;
+      if (w.Date) {
+        const bulletinDate = new Date(`${w.Date}T00:00:00Z`).getTime();
+        const currentDate = new Date(`${todayIST}T00:00:00Z`).getTime();
+        dayIndex = Math.round((currentDate - bulletinDate) / (24 * 3600 * 1000));
+      }
 
-      if (!hasCode4 && !hasCode5 && wColor === 'GREEN') continue;
+      // If bulletin was issued more than 4 days ago (dayIndex > 4) or in the future (dayIndex < 0), it is expired/invalid for today
+      if (dayIndex < 0 || dayIndex > 4) continue;
 
-      const geo = districtGeoMap.get(distName.toLowerCase()) || 
-        districtGeoMap.get(distName.toLowerCase().replace(/\s+/g, '')) ||
-        { lat: 26.2006, lng: 92.9376, state: 'India' };
+      let activeCodesStr = w.Day_1;
+      let activeColorCode = w.Day1_Color;
+      let dayName = 'Day 1';
 
-      const validityObj = parseImdValidityEpoch(w.Date, '2359', 24);
-      const issueObj = parseImdValidityEpoch(w.Date, '0830', 0);
+      if (dayIndex === 1) {
+        activeCodesStr = w.Day_2;
+        activeColorCode = w.Day2_Color;
+        dayName = 'Day 2';
+      } else if (dayIndex === 2) {
+        activeCodesStr = w.Day_3;
+        activeColorCode = w.Day3_Color;
+        dayName = 'Day 3';
+      } else if (dayIndex === 3) {
+        activeCodesStr = w.Day_4;
+        activeColorCode = w.Day4_Color;
+        dayName = 'Day 4';
+      } else if (dayIndex === 4) {
+        activeCodesStr = w.Day_5;
+        activeColorCode = w.Day5_Color;
+        dayName = 'Day 5';
+      }
 
-      if (hasCode5) {
+      const activeCodesList = String(activeCodesStr || '').split(',').map(s => s.trim()).filter(Boolean);
+      const hasCode17 = activeCodesList.includes('17'); // Extremely Heavy Rain (>204.4 mm)
+      const hasCode16 = activeCodesList.includes('16'); // Very Heavy Rain (115.6-204.4 mm)
+      const hasCode3 = activeCodesList.includes('3');   // Extremely Heavy Rainfall (Cloudburst Risk)
+      const hasCode6 = activeCodesList.includes('6');   // Squall / Strong Surface Winds
+      const hasCode9 = activeCodesList.includes('9');   // Cyclonic System / Gale Winds
+      const hasCode5 = activeCodesList.includes('5');   // Hailstorm
+      const hasCode4 = activeCodesList.includes('4');   // Thunderstorm & Lightning / Squall
+      const hasCode1 = activeCodesList.includes('1') || activeCodesList.includes('2'); // Heavy Rain
+      const wColor = parseWarningColor(activeColorCode);
+
+      const isRedOrExtreme = wColor === 'RED' || hasCode17 || hasCode3 || hasCode9;
+
+      if (!isRedOrExtreme && processedDistricts.has(distName.toLowerCase())) continue;
+
+      if (wColor === 'GREEN' && !hasCode4 && !hasCode5 && !hasCode16 && !hasCode17 && !hasCode3 && !hasCode6 && !hasCode9) {
+        continue;
+      }
+
+      // If already processed as a routine nowcast, replace with this authoritative RED/Extreme warning
+      if (isRedOrExtreme && processedDistricts.has(distName.toLowerCase())) {
+        const existingIdx = hazardEvents.findIndex(e => e.district.toLowerCase() === distName.toLowerCase());
+        if (existingIdx !== -1) {
+          hazardEvents.splice(existingIdx, 1);
+        }
+      }
+
+      const awsGeo = districtGeoMap.get(distName.toLowerCase()) || 
+        districtGeoMap.get(distName.toLowerCase().replace(/\s+/g, ''));
+      const stateHint = awsGeo?.state || (w as any).State || '';
+      const geoResolved = resolveDistrictGeo(distName, stateHint);
+      const geo = awsGeo || (geoResolved
+        ? { lat: geoResolved.lat, lng: geoResolved.lng, state: geoResolved.state }
+        : { lat: 20.9517, lng: 85.0985, state: 'India' });
+
+      const validityObj = parseImdValidityEpoch(todayIST, '2359', 24);
+      const issueObj = parseImdValidityEpoch(w.Date || todayIST, '0830', 0);
+
+      // Determine hazard profile
+      const isOrangeOrVeryHeavy = wColor === 'ORANGE' || hasCode16 || hasCode6;
+
+      if (isRedOrExtreme) {
+        // CYCLONE: ONLY when IMD explicitly issues Code 9 (Cyclonic System / Gale Winds)
+        // Do NOT use a district-name allowlist — that labels normal heavy rain events as cyclones
+        const isTrueCyclone = hasCode9;
+
+        // CLOUDBURST: Code 17 (>204.4mm Extremely Heavy Rain) or Code 3 (Extreme Cloudburst)
+        const isCloudburst = !isTrueCyclone && (hasCode17 || hasCode3);
+
+        const cat: FocusHazardCategory = isTrueCyclone ? 'CYCLONE' : isCloudburst ? 'CLOUDBURST' : 'SEVERE_WEATHER';
+        const labels: string[] = [];
+        if (hasCode9)  labels.push('CYCLONIC SYSTEM / GALE WINDS (Code 9)');
+        if (hasCode17) labels.push('EXTREMELY HEAVY RAINFALL (>204.4 mm)');
+        if (hasCode3)  labels.push('EXTREME CLOUDBURST RISK');
+        if (hasCode6)  labels.push('SQUALL / STRONG SURFACE WINDS');
+        if (hasCode16) labels.push('VERY HEAVY RAINFALL (115.6–204.4 mm)');
+        if (hasCode4)  labels.push('THUNDERSTORM & SQUALL');
+        if (labels.length === 0) labels.push('IMD RED ALERT (TAKE ACTION)');
+
+        hazardEvents.push({
+          id: `HAZ-WARN-RED-${w.Obj_id}`,
+          districtId: w.Obj_id,
+          district: distName,
+          state: geo.state,
+          category: cat,
+          categoryLabels: labels,
+          severity: 'RED',
+          isSevere: true,
+          cloudburstStatus: (hasCode17 || hasCode3) ? 'ADVISORY' : 'NONE',
+          issuedAt: issueObj.iso,
+          issuedAtIST: w.updated_at ? `${w.updated_at} IST` : '08:30 IST',
+          validUntil: validityObj.iso,
+          validUntilIST: 'Today (24h Forecast Cycle)',
+          validUntilEpoch: validityObj.epoch,
+          sourceEndpoint: 'districtwarning',
+          confidence: 'HIGH',
+          latitude: geo.lat,
+          longitude: geo.lng,
+          summary: `IMD RED ALERT (${dayName}): ${labels.join(' · ')} in ${distName}, ${geo.state}.`,
+          rawPayload: {
+            bulletinType: `IMD Multi-Day Warning Division (${dayName} Active)`,
+            forecastDay: dayName,
+            bulletinDate: w.Date,
+            dayCodes: activeCodesStr,
+            dayColor: activeColorCode,
+            updatedAt: w.updated_at,
+          },
+          affectedPopulationEstimate: {
+            fieldOfficers: 15,
+            tourists: 140,
+            citizens: 5200,
+            total: 5355,
+          },
+        });
+        processedDistricts.add(distName.toLowerCase());
+      } else if (hasCode5) {
         hazardEvents.push({
           id: `HAZ-WARN-HAIL-${w.Obj_id}`,
           districtId: w.Obj_id,
@@ -460,17 +601,19 @@ export async function GET(req: NextRequest) {
           issuedAt: issueObj.iso,
           issuedAtIST: w.updated_at ? `${w.updated_at} IST` : '08:30 IST',
           validUntil: validityObj.iso,
-          validUntilIST: '24-hour Bulletin Cycle',
+          validUntilIST: 'Today (24h Forecast Cycle)',
           validUntilEpoch: validityObj.epoch,
           sourceEndpoint: 'districtwarning',
           confidence: 'HIGH',
           latitude: geo.lat,
           longitude: geo.lng,
-          summary: `Official IMD District Warning: Hailstorm Bulletin (Code 5) issued for ${distName}.`,
+          summary: `Official IMD District Warning (${dayName}): Hailstorm Bulletin (Code 5) issued for ${distName}, ${geo.state}.`,
           rawPayload: {
-            bulletinType: 'IMD Multi-Day Warning Division',
-            day1Codes: w.Day_1,
-            day1Color: w.Day1_Color,
+            bulletinType: `IMD Multi-Day Warning Division (${dayName} Active)`,
+            forecastDay: dayName,
+            bulletinDate: w.Date,
+            dayCodes: activeCodesStr,
+            dayColor: activeColorCode,
             updatedAt: w.updated_at,
           },
           affectedPopulationEstimate: {
@@ -480,6 +623,51 @@ export async function GET(req: NextRequest) {
             total: 1151,
           },
         });
+        processedDistricts.add(distName.toLowerCase());
+      } else if (isOrangeOrVeryHeavy) {
+        const labels: string[] = [];
+        if (hasCode16) labels.push('VERY HEAVY RAIN (115.6-204.4 mm)');
+        if (hasCode6) labels.push('SQUALL / GALE WINDS');
+        if (hasCode4) labels.push('THUNDERSTORM & LIGHTNING');
+        if (hasCode1) labels.push('HEAVY RAIN');
+        if (labels.length === 0) labels.push('IMD ORANGE ALERT (BE PREPARED)');
+
+        hazardEvents.push({
+          id: `HAZ-WARN-ORANGE-${w.Obj_id}`,
+          districtId: w.Obj_id,
+          district: distName,
+          state: geo.state,
+          category: hasCode16 ? 'VERY_HEAVY_RAIN' : 'THUNDERSTORM',
+          categoryLabels: labels,
+          severity: 'ORANGE',
+          isSevere: true,
+          cloudburstStatus: 'NONE',
+          issuedAt: issueObj.iso,
+          issuedAtIST: w.updated_at ? `${w.updated_at} IST` : '08:30 IST',
+          validUntil: validityObj.iso,
+          validUntilIST: 'Today (24h Forecast Cycle)',
+          validUntilEpoch: validityObj.epoch,
+          sourceEndpoint: 'districtwarning',
+          confidence: 'HIGH',
+          latitude: geo.lat,
+          longitude: geo.lng,
+          summary: `IMD ORANGE ALERT (${dayName}): ${labels.join(' · ')} in ${distName}, ${geo.state}.`,
+          rawPayload: {
+            bulletinType: `IMD Multi-Day Warning Division (${dayName} Active)`,
+            forecastDay: dayName,
+            bulletinDate: w.Date,
+            dayCodes: activeCodesStr,
+            dayColor: activeColorCode,
+            updatedAt: w.updated_at,
+          },
+          affectedPopulationEstimate: {
+            fieldOfficers: 8,
+            tourists: 60,
+            citizens: 2200,
+            total: 2268,
+          },
+        });
+        processedDistricts.add(distName.toLowerCase());
       } else if (hasCode4) {
         hazardEvents.push({
           id: `HAZ-WARN-TS-${w.Obj_id}`,
@@ -489,22 +677,24 @@ export async function GET(req: NextRequest) {
           category: 'THUNDERSTORM',
           categoryLabels: ['THUNDERSTORM & LIGHTNING / SQUALL (Code 4)'],
           severity: wColor === 'GREEN' ? 'YELLOW' : wColor,
-          isSevere: wColor === 'RED' || wColor === 'ORANGE',
+          isSevere: (wColor as HazardSeverity) === 'RED' || (wColor as HazardSeverity) === 'ORANGE',
           cloudburstStatus: 'NONE',
           issuedAt: issueObj.iso,
           issuedAtIST: w.updated_at ? `${w.updated_at} IST` : '08:30 IST',
           validUntil: validityObj.iso,
-          validUntilIST: '24-hour Bulletin Cycle',
+          validUntilIST: 'Today (24h Forecast Cycle)',
           validUntilEpoch: validityObj.epoch,
           sourceEndpoint: 'districtwarning',
           confidence: 'HIGH',
           latitude: geo.lat,
           longitude: geo.lng,
-          summary: `Official IMD Warning: Thunderstorm & Lightning / Squall active in ${distName}.`,
+          summary: `Official IMD Warning (${dayName}): Thunderstorm & Lightning / Squall active in ${distName}, ${geo.state}.`,
           rawPayload: {
-            bulletinType: 'IMD Multi-Day Warning Division',
-            day1Codes: w.Day_1,
-            day1Color: w.Day1_Color,
+            bulletinType: `IMD Multi-Day Warning Division (${dayName} Active)`,
+            forecastDay: dayName,
+            bulletinDate: w.Date,
+            dayCodes: activeCodesStr,
+            dayColor: activeColorCode,
             updatedAt: w.updated_at,
           },
           affectedPopulationEstimate: {
@@ -514,127 +704,188 @@ export async function GET(req: NextRequest) {
             total: 854,
           },
         });
+        processedDistricts.add(distName.toLowerCase());
       }
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // D. PLUVIAL FLOOD RISK & LOW-LYING AREAS LAYER (Part 5)
-    // Derived from Bhuvan / NRSC DEM Elevation Minima + Live Rainfall Intensity
-    // ──────────────────────────────────────────────────────────────────────────
-    const pluvialFloodZones: PluvialFloodZone[] = [
-      {
-        id: 'PFZ-GARO-01',
-        zoneName: 'Simsang Lowland Basin Minima',
-        district: 'South Garo Hills',
-        state: 'Meghalaya',
-        latitude: 25.2810,
-        longitude: 90.6280,
-        demElevationM: 42.5,
-        relativeDepressionM: -18.4,
-        liveRainRateMmH: 14.5,
-        cumulativeRain24hMm: 68.2,
-        pluvialFloodRisk: 'HIGH',
-        trend: 'RISING',
-        confidence: 'HIGH',
-        freshness: '2026-09-25 21:45 IST',
-        drainageContext: 'Simsang River alluvial trough; bottleneck at Baghmara confluence.',
-        estimatedHousesAtRisk: 340,
-      },
-      {
-        id: 'PFZ-KAMRUP-02',
-        zoneName: 'Deepor Beel Depression Inundation Corridor',
-        district: 'Kamrup Metropolitan',
-        state: 'Assam',
-        latitude: 26.1280,
-        longitude: 91.6620,
-        demElevationM: 48.0,
-        relativeDepressionM: -14.2,
-        liveRainRateMmH: 18.0,
-        cumulativeRain24hMm: 85.0,
-        pluvialFloodRisk: 'CRITICAL',
-        trend: 'RISING',
-        confidence: 'HIGH',
-        freshness: '2026-09-25 21:50 IST',
-        drainageContext: 'Mora Bharalu stormwater outflow overflow; urban runoff concentration.',
-        estimatedHousesAtRisk: 1250,
-      },
-      {
-        id: 'PFZ-CACHAR-03',
-        zoneName: 'Barak Valley Natural Sump & Retention Basin',
-        district: 'Cachar',
-        state: 'Assam',
-        latitude: 24.8333,
-        longitude: 92.7789,
-        demElevationM: 26.0,
-        relativeDepressionM: -21.0,
-        liveRainRateMmH: 8.5,
-        cumulativeRain24hMm: 42.0,
-        pluvialFloodRisk: 'MODERATE',
-        trend: 'STABLE',
-        confidence: 'HIGH',
-        freshness: '2026-09-25 21:30 IST',
-        drainageContext: 'Barak River low bank retention basin; high soil saturation.',
-        estimatedHousesAtRisk: 520,
-      },
-      {
-        id: 'PFZ-DIBRU-04',
-        zoneName: 'Dibrugarh Brahmaputra Low-Lying Embankment Zone',
-        district: 'Dibrugarh',
-        state: 'Assam',
-        latitude: 27.4728,
-        longitude: 94.9120,
-        demElevationM: 104.0,
-        relativeDepressionM: -12.5,
-        liveRainRateMmH: 22.0,
-        cumulativeRain24hMm: 112.0,
-        pluvialFloodRisk: 'CRITICAL',
-        trend: 'RISING',
-        confidence: 'HIGH',
-        freshness: '2026-09-25 21:55 IST',
-        drainageContext: 'DTP drain siltation; backflow vulnerability during peak intensity.',
-        estimatedHousesAtRisk: 890,
-      },
-      {
-        id: 'PFZ-EAST-GARO-05',
-        zoneName: 'Williamnagar Floodplain Local Minima',
-        district: 'East Garo Hills',
-        state: 'Meghalaya',
-        latitude: 25.5900,
-        longitude: 90.6200,
-        demElevationM: 165.0,
-        relativeDepressionM: -9.8,
-        liveRainRateMmH: 6.0,
-        cumulativeRain24hMm: 31.0,
-        pluvialFloodRisk: 'LOW',
-        trend: 'RECEDING',
-        confidence: 'MEDIUM',
-        freshness: '2026-09-25 21:15 IST',
-        drainageContext: 'Natural gravity discharge operational; monitoring upstream inflows.',
-        estimatedHousesAtRisk: 110,
-      },
-      {
-        id: 'PFZ-SIKKIM-06',
-        zoneName: 'Singtam Teesta Valley Sump Footprint',
-        district: 'Gangtok',
-        state: 'Sikkim',
-        latitude: 27.2345,
-        longitude: 88.4988,
-        demElevationM: 350.0,
-        relativeDepressionM: -16.0,
-        liveRainRateMmH: 26.5,
-        cumulativeRain24hMm: 94.0,
-        pluvialFloodRisk: 'HIGH',
-        trend: 'RISING',
-        confidence: 'HIGH',
-        freshness: '2026-09-25 21:50 IST',
-        drainageContext: 'Teesta Gorge constriction; debris accumulation restricting culverts.',
-        estimatedHousesAtRisk: 410,
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // D. PLUVIAL FLOOD RISK LAYER â€” Dynamically derived from live AWS station data
+    // Rules:
+    //   CRITICAL : rainRate >= 70 mm/h  OR  cum24h >= 150 mm
+    //   HIGH     : rainRate >= 25 mm/h  OR  cum24h >= 75 mm
+    //   MODERATE : rainRate > 0  OR  cum24h > 10 mm
+    //   (zones with zero observed rain are NOT created)
+    // Cyclone label: only applied when an active CYCLONE / SEVERE_WEATHER event
+    //   exists in the same district from the IMD Warning pipeline above.
+    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    // Build a set of districts that have an active IMD cyclone/severe event
+    const activeCycloneDistricts = new Set<string>(
+      hazardEvents
+        .filter(e => e.category === 'CYCLONE' || e.category === 'SEVERE_WEATHER')
+        .map(e => e.district.toLowerCase().replace(/_/g, ' '))
+    );
+
+    // Group AWS stations by district and aggregate rainfall metrics
+    interface DistrictRainMetric {
+      districtName: string;
+      stateName: string;
+      lat: number;
+      lng: number;
+      rainRateMmH: number;   // highest hourly rate among stations in district
+      cum24hMm: number;      // highest 24h cumulative among stations in district
+      minMslp: number;       // lowest MSLP (pressure) observed
+      obsTimestamp: string;  // most recent observation time string
+      stationCount: number;
+    }
+    const districtRainMetrics = new Map<string, DistrictRainMetric>();
+
+    for (const [distKey, stnList] of districtAwsMap.entries()) {
+      const geo = districtGeoMap.get(distKey);
+      if (!geo) continue;
+
+      let bestRainRate = 0;
+      let bestCum24h = 0;
+      let lowestMslp = 9999;
+      let latestTs = '';
+
+      for (const st of stnList) {
+        const r1 = parseFloat(String(st.RAINFALL_SEL || 0)) || 0;
+        const r24 = parseFloat(String(st.RAINFALL || 0)) || 0;
+        const p = parseFloat(String(st.MSLP || 0)) || 0;
+        if (r1 > bestRainRate) bestRainRate = r1;
+        if (r24 > bestCum24h) bestCum24h = r24;
+        if (p > 800 && p < lowestMslp) lowestMslp = p;
+        if (st.TIME && st.DATE) latestTs = `${st.DATE} ${st.TIME} IST`;
       }
-    ];
+
+      // Only track districts with any measurable rainfall
+      if (bestRainRate > 0 || bestCum24h > 10) {
+        const distName = (stnList[0]?.DISTRICT || distKey).replace(/_/g, ' ');
+        const stateName = (stnList[0]?.STATE || '').replace(/_/g, ' ');
+        districtRainMetrics.set(distKey, {
+          districtName: distName,
+          stateName,
+          lat: geo.lat,
+          lng: geo.lng,
+          rainRateMmH: bestRainRate,
+          cum24hMm: bestCum24h,
+          minMslp: lowestMslp === 9999 ? 0 : lowestMslp,
+          obsTimestamp: latestTs || 'Live AWS',
+          stationCount: stnList.length,
+        });
+      }
+    }
+
+    // Build pluvialFloodZones dynamically from real observations
+    const pluvialFloodZones: PluvialFloodZone[] = [];
+    let pfzIndex = 0;
+
+    for (const [distKey, metric] of districtRainMetrics.entries()) {
+      const { districtName, stateName, lat, lng, rainRateMmH, cum24hMm, minMslp, obsTimestamp } = metric;
+
+      // Determine real risk level from observed values
+      let pluvialFloodRisk: PluvialFloodZone['pluvialFloodRisk'];
+      if (rainRateMmH >= 70 || cum24hMm >= 150) {
+        pluvialFloodRisk = 'CRITICAL';
+      } else if (rainRateMmH >= 25 || cum24hMm >= 75) {
+        pluvialFloodRisk = 'HIGH';
+      } else {
+        pluvialFloodRisk = 'MODERATE';
+      }
+
+      // Only show CRITICAL and HIGH on the map by default (same as hazard events)
+      if (pluvialFloodRisk === 'MODERATE') continue;
+
+      // Trend: RISING if both hourly and 24h are significant, else STABLE
+      const trend: PluvialFloodZone['trend'] =
+        (rainRateMmH >= 25 && cum24hMm >= 75) ? 'RISING' : 'STABLE';
+
+      // Determine if this district has an active cyclone/severe event from IMD
+      const hasCycloneEvent = activeCycloneDistricts.has(districtName.toLowerCase());
+
+      // Drainage/context label: only reference cyclone if genuinely active
+      const drainageContext = hasCycloneEvent
+        ? `Active IMD cyclonic system driving intense rainbands over ${districtName}. Drainage systems at capacity.`
+        : `Intense rainfall accumulation (${cum24hMm.toFixed(0)} mm/24h) exceeding drainage capacity in ${districtName}.`;
+
+      // Estimated houses at risk â€” scaled from observed rain intensity
+      const estimatedHousesAtRisk = Math.round(
+        (pluvialFloodRisk === 'CRITICAL' ? 300 : 120) +
+        (cum24hMm / 10) * 15
+      );
+
+      // City hotspot: only one pinpoint per zone, labeled correctly
+      const hotspotCategory = hasCycloneEvent
+        ? 'FLOOD_PRONE_AREA'   // Do NOT label as CYCLONE_PRONE_AREA unless cyclone event is live
+        : 'FLOOD_PRONE_AREA';
+
+      pfzIndex++;
+      pluvialFloodZones.push({
+        id: `PFZ-LIVE-${distKey.toUpperCase()}-${pfzIndex.toString().padStart(2, '0')}`,
+        zoneName: `${districtName} Live Rainfall Flood Zone`,
+        district: districtName,
+        state: stateName,
+        latitude: lat,
+        longitude: lng,
+        demElevationM: 0,          // Real DEM not available at runtime; 0 = unknown
+        relativeDepressionM: 0,
+        liveRainRateMmH: rainRateMmH,
+        cumulativeRain24hMm: cum24hMm,
+        pluvialFloodRisk,
+        trend,
+        confidence: metric.stationCount >= 2 ? 'HIGH' : 'MEDIUM',
+        freshness: obsTimestamp,
+        drainageContext,
+        estimatedHousesAtRisk,
+        cityHotspots: [
+          {
+            id: `PFZ-LIVE-HP-${distKey.toUpperCase()}-01`,
+            name: `${districtName} ${pluvialFloodRisk === 'CRITICAL' ? 'Critical' : 'High'} Flood Risk Area`,
+            category: hotspotCategory,
+            latitude: lat,
+            longitude: lng,
+            elevationM: 0,
+            waterloggingDepthM: pluvialFloodRisk === 'CRITICAL' ? 1.5 : 0.8,
+            severity: pluvialFloodRisk === 'CRITICAL' ? 'CRITICAL' : 'HIGH',
+            affectedStructures: Math.round(estimatedHousesAtRisk * 0.6),
+            drainageIssue: `AWS observed ${rainRateMmH.toFixed(1)} mm/h intensity; 24h total ${cum24hMm.toFixed(0)} mm`,
+            recommendation: pluvialFloodRisk === 'CRITICAL'
+              ? 'Activate emergency dewatering; issue evacuation advisory for low-lying habitations'
+              : 'Monitor continuously; pre-position rescue equipment near flood-prone localities',
+          },
+        ],
+      });
+    }
+    // Limit to top 20 worst zones by rainfall intensity to prevent map clutter
+    pluvialFloodZones.sort((a, b) => b.liveRainRateMmH - a.liveRainRateMmH || b.cumulativeRain24hMm - a.cumulativeRain24hMm);
+    const trimmedPluvialZones = pluvialFloodZones.slice(0, 20);
+    // Top 20 worst zones served as filteredPluvial downstream
+
+    // Sort by hazard priority: CYCLONE & RED ALERTS strictly at the top!
+    function getHazardPriorityScore(ev: DerivedHazardEvent): number {
+      let score = 0;
+      if (ev.severity === 'RED') score += 1000;
+      else if (ev.severity === 'ORANGE') score += 500;
+      else if (ev.severity === 'YELLOW') score += 200;
+
+      if (ev.category === 'CYCLONE') score += 800;
+      else if (ev.category === 'CLOUDBURST') score += 600;
+      else if (ev.category === 'HAIL') score += 400;
+      else if (ev.category === 'VERY_HEAVY_RAIN') score += 350;
+      else if (ev.category === 'THUNDERSTORM') score += 150;
+
+      if (ev.affectedPopulationEstimate?.total) {
+        score += Math.min(200, Math.log10(ev.affectedPopulationEstimate.total + 1) * 40);
+      }
+      return score;
+    }
+
+    hazardEvents.sort((a, b) => getHazardPriorityScore(b) - getHazardPriorityScore(a));
 
     // Filter events according to request parameters
     let filteredEvents = hazardEvents;
-    let filteredPluvial = pluvialFloodZones;
+    let filteredPluvial = trimmedPluvialZones;
 
     if (stateFilter && stateFilter !== 'All India' && stateFilter !== 'All States') {
       filteredEvents = filteredEvents.filter(e => e.state.toLowerCase().includes(stateFilter.toLowerCase()));
@@ -645,7 +896,7 @@ export async function GET(req: NextRequest) {
       filteredEvents = filteredEvents.filter(e => e.district.toLowerCase().includes(districtFilter.toLowerCase()));
     }
 
-    if (categoryFilter && ['THUNDERSTORM', 'HAIL', 'CLOUDBURST', 'BACKGROUND'].includes(categoryFilter)) {
+    if (categoryFilter && ['CYCLONE', 'CLOUDBURST', 'HAIL', 'VERY_HEAVY_RAIN', 'THUNDERSTORM', 'SEVERE_WEATHER', 'BACKGROUND'].includes(categoryFilter)) {
       filteredEvents = filteredEvents.filter(e => e.category === categoryFilter);
     }
 
@@ -654,6 +905,7 @@ export async function GET(req: NextRequest) {
     const displayedEvents = showAllActivity ? filteredEvents : severeEvents;
 
     // Aggregate metrics
+    const cycloneCount = filteredEvents.filter(e => e.category === 'CYCLONE').length;
     const thunderstormCount = filteredEvents.filter(e => e.category === 'THUNDERSTORM').length;
     const hailCount = filteredEvents.filter(e => e.category === 'HAIL').length;
     const cloudburstCount = filteredEvents.filter(e => e.category === 'CLOUDBURST').length;
@@ -679,6 +931,7 @@ export async function GET(req: NextRequest) {
         totalEvents: filteredEvents.length,
         severeEventsCount: severeEvents.length,
         displayedCount: displayedEvents.length,
+        cyclones: cycloneCount,
         thunderstorms: thunderstormCount,
         hailstorms: hailCount,
         cloudbursts: cloudburstCount,

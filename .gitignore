@@ -17,6 +17,14 @@ dist
 # TypeScript cache
 *.tsbuildinfo
 
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.env
+.venv/
+venv/
+
 # OS & Editor files
 .DS_Store
 *.pem

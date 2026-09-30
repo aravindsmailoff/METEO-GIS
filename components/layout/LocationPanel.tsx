@@ -76,6 +76,7 @@ interface LocationPanelProps {
     isAvailable: boolean;
     radarStation?: string;
     reflectivityDbz?: number;
+    stationCode?: string;
   } | null;
   // Satellite
   satelliteObservation?: {
@@ -83,7 +84,7 @@ interface LocationPanelProps {
     cloudTopTempC?: number;
   } | null;
   onOpenSatelliteViewer?: () => void;
-  onOpenRadarViewer?: () => void;
+  onOpenRadarViewer?: (stn?: string) => void;
 }
 
 /* Helpers */
@@ -432,7 +433,7 @@ export const LocationPanel: React.FC<LocationPanelProps> = ({
                   <button
                     className="mg-btn"
                     style={{ height: 26, padding: '0 8px', fontSize: 11 }}
-                    onClick={onOpenRadarViewer}
+                    onClick={() => onOpenRadarViewer(radarObservation?.stationCode)}
                   >
                     View
                     <ExternalLink size={10} />

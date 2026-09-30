@@ -22,6 +22,11 @@ interface MeteoHeaderProps {
   onOpenSatellite: () => void;
   onOpenRadar: () => void;
   onOpenSystemInfo: () => void;
+  operationalMode?: 'LIVE' | 'HISTORICAL';
+  onToggleOperationalMode?: (mode: 'LIVE' | 'HISTORICAL') => void;
+  onOpenDataHealth?: () => void;
+  nextIngestion?: string;
+  lastIngestion?: string;
 }
 
 export const MeteoHeader: React.FC<MeteoHeaderProps> = ({
@@ -41,6 +46,11 @@ export const MeteoHeader: React.FC<MeteoHeaderProps> = ({
   onOpenSatellite,
   onOpenRadar,
   onOpenSystemInfo,
+  operationalMode = 'LIVE',
+  onToggleOperationalMode,
+  onOpenDataHealth,
+  nextIngestion = '5m cycle',
+  lastIngestion = 'Current',
 }) => {
   const searchRef = useRef<HTMLDivElement>(null);
 
@@ -122,7 +132,48 @@ export const MeteoHeader: React.FC<MeteoHeaderProps> = ({
       </div>
 
       {/* ── Right: Live Status, Clocks & Tools ─────────────────────── */}
-      <div className="flex items-center gap-2.5 flex-shrink-0">
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Mode Switcher: LIVE vs HISTORICAL (Section 27 & 28) */}
+        {onToggleOperationalMode && (
+          <div className="flex items-center rounded-md bg-slate-900 border border-slate-800 p-0.5 text-[10.5px] font-bold">
+            <button
+              onClick={() => onToggleOperationalMode('LIVE')}
+              className={`px-2 py-0.5 rounded transition-all flex items-center gap-1 ${
+                operationalMode === 'LIVE'
+                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Live Operational Mode: Current IMD Telemetry Only"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${operationalMode === 'LIVE' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+              <span>LIVE</span>
+            </button>
+            <button
+              onClick={() => onToggleOperationalMode('HISTORICAL')}
+              className={`px-2 py-0.5 rounded transition-all flex items-center gap-1 ${
+                operationalMode === 'HISTORICAL'
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Historical Mode: Explicit Past Incident Archives (Isolated from Live Deck)"
+            >
+              <span>HISTORICAL</span>
+            </button>
+          </div>
+        )}
+
+        {/* Data Health Audit Panel Trigger (Section 23 & 24) */}
+        {onOpenDataHealth && (
+          <button
+            onClick={onOpenDataHealth}
+            className="h-7 px-2 rounded-md bg-slate-900 border border-emerald-500/30 hover:border-emerald-500/60 text-slate-300 hover:text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition-all shadow-sm"
+            title="Open Live Data Health & Ingestion Audit Panel"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="hidden md:inline">DATA HEALTH</span>
+          </button>
+        )}
+
         {/* Focus Hazard Button */}
         <button
           onClick={onToggleHazardFocus}
@@ -149,7 +200,7 @@ export const MeteoHeader: React.FC<MeteoHeaderProps> = ({
           title="Open INSAT-3DR Geostationary Viewer"
         >
           <Satellite size={12} className="text-blue-400" />
-          <span className="hidden sm:inline">INSAT-3DR</span>
+          <span className="hidden lg:inline">INSAT-3DR</span>
         </button>
 
         {/* Radar Modal Quick Launch */}
@@ -159,7 +210,7 @@ export const MeteoHeader: React.FC<MeteoHeaderProps> = ({
           title="Open IMD Doppler Weather Radar (DWR)"
         >
           <Radio size={12} className="text-cyan-400" />
-          <span className="hidden sm:inline">DWR Radar</span>
+          <span className="hidden lg:inline">DWR Radar</span>
         </button>
 
         {/* System Overview */}
@@ -180,11 +231,17 @@ export const MeteoHeader: React.FC<MeteoHeaderProps> = ({
           <RefreshCw size={12} className={`transition-transform duration-500 ${isRefreshing ? 'rotate-180 text-blue-400' : ''}`} />
         </button>
 
-        {/* Live Clock & Status */}
+        {/* Live Clock & Ingestion Cycle */}
         <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+          <div
+            className="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 cursor-pointer"
+            onClick={onOpenDataHealth}
+            title={`Last Ingestion: ${lastIngestion} · Next Check: ${nextIngestion}`}
+          >
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[11px] font-bold tracking-wide">LIVE</span>
+            <span className="text-[11px] font-bold tracking-wide">
+              {operationalMode === 'LIVE' ? 'LIVE' : 'HISTORICAL'}
+            </span>
           </div>
           <span className="text-xs font-mono font-semibold text-slate-300 tabular-nums">
             {liveTime || '—'}

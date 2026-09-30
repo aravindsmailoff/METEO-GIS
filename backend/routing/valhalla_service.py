@@ -19,12 +19,19 @@ logger = logging.getLogger("antigravity.routing.valhalla")
 DEFAULT_VALHALLA_CONFIG = os.getenv("VALHALLA_CONFIG_PATH", "/data/valhalla.json")
 VALHALLA_HTTP_URL = os.getenv("VALHALLA_URL", os.getenv("VALHALLA_HTTP_URL", "http://localhost:8002"))
 
-# Try importing official pyvalhalla binding
+# Try importing official pyvalhalla binding dynamically (avoids static IDE linter warnings on Windows)
 HAS_PYVALHALLA = False
+Actor = None
+get_config = None
+
 try:
-    from valhalla import Actor, get_config
-    HAS_PYVALHALLA = True
-    logger.info("[ValhallaService] Successfully imported native pyvalhalla bindings.")
+    import importlib
+    _valhalla = importlib.import_module("valhalla")
+    Actor = getattr(_valhalla, "Actor", None)
+    get_config = getattr(_valhalla, "get_config", None)
+    if Actor is not None:
+        HAS_PYVALHALLA = True
+        logger.info("[ValhallaService] Successfully imported native pyvalhalla bindings.")
 except (ImportError, OSError) as e:
     logger.warning(f"[ValhallaService] Native pyvalhalla not available in current runtime ({e}). Spatial simulation mode enabled.")
 
