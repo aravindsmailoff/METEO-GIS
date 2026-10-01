@@ -7,7 +7,7 @@ import {
   IMDDistrictWarningRecord, 
   IMDAwsStationRecord 
 } from '@/lib/imdClient';
-import { resolveDistrictGeo } from '@/lib/indianDistrictCoordinates';
+import { resolveDistrictGeo, getClosestDistrictByCoordinates } from '@/lib/indianDistrictCoordinates';
 
 export const dynamic = 'force-dynamic';
 
@@ -159,12 +159,13 @@ export async function GET(req: NextRequest) {
   const stateFilter = searchParams.get('state');
   const categoryFilter = searchParams.get('category'); // 'THUNDERSTORM' | 'HAIL' | 'CLOUDBURST' | 'BACKGROUND'
   const showAllActivity = searchParams.get('all') === 'true'; // Default is false: RED/ORANGE focus only
+  const forceRefresh = searchParams.get('fresh') === '1' || searchParams.get('refresh') === 'true';
 
   try {
     const [nowcastRes, warningRes, awsRes] = await Promise.all([
-      getLiveIMDDistrictNowcast().catch(() => ({ nowcasts: [] as IMDDistrictNowcastRecord[], lastFetched: 0, isLive: false })),
-      getLiveIMDDistrictWarning().catch(() => ({ warnings: [] as IMDDistrictWarningRecord[], lastFetched: 0, isLive: false })),
-      getLiveIMDAwsData().catch(() => ({ stations: [] as IMDAwsStationRecord[], lastFetched: 0, isLive: false })),
+      getLiveIMDDistrictNowcast(forceRefresh).catch(() => ({ nowcasts: [] as IMDDistrictNowcastRecord[], lastFetched: 0, isLive: false })),
+      getLiveIMDDistrictWarning(forceRefresh).catch(() => ({ warnings: [] as IMDDistrictWarningRecord[], lastFetched: 0, isLive: false })),
+      getLiveIMDAwsData(forceRefresh).catch(() => ({ stations: [] as IMDAwsStationRecord[], lastFetched: 0, isLive: false })),
     ]);
 
     const { nowcasts, isLive: nowcastLive } = nowcastRes;
@@ -176,16 +177,42 @@ export async function GET(req: NextRequest) {
     const finalStations = stations || [];
 
     // 1. Build geographic coordinates map per district from AWS stations
+    // 1. Build geographic coordinates map per district from nowcast centroids and AWS stations
     const districtGeoMap = new Map<string, { lat: number; lng: number; state: string }>();
     const districtAwsMap = new Map<string, IMDAwsStationRecord[]>();
 
+    for (const nc of finalNowcasts || []) {
+      const d = (nc.District || nc.State_District || '').toLowerCase().trim();
+      if (d && nc.lat && nc.lon && !districtGeoMap.has(d)) {
+        districtGeoMap.set(d, { lat: nc.lat, lng: nc.lon, state: nc.State || '' });
+      }
+    }
+
+    for (const w of finalWarnings || []) {
+      const d = (w.District || '').toLowerCase().trim();
+      if (d && w.lat && w.lon && !districtGeoMap.has(d)) {
+        districtGeoMap.set(d, { lat: w.lat, lng: w.lon, state: w.state || '' });
+      }
+    }
+
     for (const st of finalStations || []) {
-      const d = (st.DISTRICT || '').toLowerCase().trim();
       const lat = parseFloat(st.Latitude);
       const lng = parseFloat(st.Longitude);
-      if (d && !isNaN(lat) && !isNaN(lng) && lat >= 6 && lat <= 38 && lng >= 65 && lng <= 100) {
+      if (isNaN(lat) || isNaN(lng) || lat < 6 || lat > 38 || lng < 65 || lng > 100) continue;
+
+      let d = (st.DISTRICT || '').toLowerCase().trim();
+      if (!d) {
+        d = (st.STATION || '').toLowerCase().trim();
+      }
+
+      if (d) {
+        let stState = (st.STATE || '').replace(/_/g, ' ').trim();
+        if (!stState) {
+          const closest = getClosestDistrictByCoordinates(lat, lng);
+          stState = closest.state;
+        }
         if (!districtGeoMap.has(d)) {
-          districtGeoMap.set(d, { lat, lng, state: (st.STATE || '').replace(/_/g, ' ') });
+          districtGeoMap.set(d, { lat, lng, state: stState });
         }
         if (!districtAwsMap.has(d)) {
           districtAwsMap.set(d, []);
@@ -397,7 +424,7 @@ export async function GET(req: NextRequest) {
           category: 'THUNDERSTORM',
           categoryLabels: labels,
           severity: tSeverity,
-          isSevere: tSeverity === 'RED' || tSeverity === 'ORANGE',
+          isSevere: tSeverity !== 'GREEN',
           cloudburstStatus: 'NONE',
           issuedAt: effectiveIssueObj.iso,
           issuedAtIST: effectiveIssueObj.ist,
@@ -487,13 +514,16 @@ export async function GET(req: NextRequest) {
       if (w.Date) {
         const bulletinDate = new Date(`${w.Date}T00:00:00Z`).getTime();
         const currentDate = new Date(`${todayIST}T00:00:00Z`).getTime();
-        dayIndex = Math.round((currentDate - bulletinDate) / (24 * 3600 * 1000));
+        dayIndex = Math.max(0, Math.round((currentDate - bulletinDate) / (24 * 3600 * 1000)));
       }
 
-      // Preserve active warning codes (Day 1 as authoritative primary bulletin; Day 2 if yesterday)
-      const activeCodesStr = (dayIndex === 1 && w.Day_2) ? w.Day_2 : w.Day_1;
-      const activeColorCode = (dayIndex === 1 && w.Day2_Color) ? w.Day2_Color : w.Day1_Color;
-      const dayName = (dayIndex === 1 && w.Day_2) ? 'Day 2' : 'Day 1';
+      // Preserve active warning codes mapped across the 5-day synoptic forecast
+      const allCodes = [w.Day_1, w.Day_2, w.Day_3, w.Day_4, w.Day_5];
+      const allColors = [w.Day1_Color, w.Day2_Color, w.Day3_Color, w.Day4_Color, w.Day5_Color];
+      const activeSlot = dayIndex % 5;
+      const activeCodesStr = allCodes[activeSlot] || w.Day_1;
+      const activeColorCode = allColors[activeSlot] || w.Day1_Color;
+      const dayName = `Day ${activeSlot + 1}`;
 
       const activeCodesList = String(activeCodesStr || '').split(',').map(s => s.trim()).filter(Boolean);
       const hasCode17 = activeCodesList.includes('17'); // Extremely Heavy Rain (>204.4 mm)
@@ -531,7 +561,9 @@ export async function GET(req: NextRequest) {
         : { lat: 20.9517, lng: 85.0985, state: 'India' });
 
       const validityObj = parseImdValidityEpoch(todayIST, '2359', 24);
-      const issueObj = parseImdValidityEpoch(w.Date || todayIST, '0830', 0);
+      const timePart = w.updated_at ? (w.updated_at.includes(' ') ? w.updated_at.split(' ')[1] : w.updated_at) : '08:30:00';
+      const effectiveIssuedAtIST = `${todayIST} ${timePart} IST`;
+      const issueObj = parseImdValidityEpoch(todayIST, timePart.replace(/:/g, '').slice(0, 4) || '0830', 0);
 
       // Determine hazard profile
       const isOrangeOrVeryHeavy = wColor === 'ORANGE' || hasCode16 || hasCode6;
@@ -565,7 +597,7 @@ export async function GET(req: NextRequest) {
           isSevere: true,
           cloudburstStatus: (hasCode17 || hasCode3) ? 'ADVISORY' : 'NONE',
           issuedAt: issueObj.iso,
-          issuedAtIST: w.updated_at ? `${w.updated_at} IST` : '08:30 IST',
+          issuedAtIST: effectiveIssuedAtIST,
           validUntil: validityObj.iso,
           validUntilIST: 'Today (24h Forecast Cycle)',
           validUntilEpoch: validityObj.epoch,
@@ -602,7 +634,7 @@ export async function GET(req: NextRequest) {
           isSevere: true,
           cloudburstStatus: 'NONE',
           issuedAt: issueObj.iso,
-          issuedAtIST: w.updated_at ? `${w.updated_at} IST` : '08:30 IST',
+          issuedAtIST: effectiveIssuedAtIST,
           validUntil: validityObj.iso,
           validUntilIST: 'Today (24h Forecast Cycle)',
           validUntilEpoch: validityObj.epoch,
@@ -646,7 +678,7 @@ export async function GET(req: NextRequest) {
           isSevere: true,
           cloudburstStatus: 'NONE',
           issuedAt: issueObj.iso,
-          issuedAtIST: w.updated_at ? `${w.updated_at} IST` : '08:30 IST',
+          issuedAtIST: effectiveIssuedAtIST,
           validUntil: validityObj.iso,
           validUntilIST: 'Today (24h Forecast Cycle)',
           validUntilEpoch: validityObj.epoch,
@@ -683,7 +715,7 @@ export async function GET(req: NextRequest) {
           isSevere: (wColor as HazardSeverity) === 'RED' || (wColor as HazardSeverity) === 'ORANGE',
           cloudburstStatus: 'NONE',
           issuedAt: issueObj.iso,
-          issuedAtIST: w.updated_at ? `${w.updated_at} IST` : '08:30 IST',
+          issuedAtIST: effectiveIssuedAtIST,
           validUntil: validityObj.iso,
           validUntilIST: 'Today (24h Forecast Cycle)',
           validUntilEpoch: validityObj.epoch,
@@ -726,7 +758,7 @@ export async function GET(req: NextRequest) {
     const activeCycloneDistricts = new Set<string>(
       hazardEvents
         .filter(e => e.category === 'CYCLONE' || e.category === 'SEVERE_WEATHER')
-        .map(e => e.district.toLowerCase().replace(/_/g, ' '))
+        .map(e => (e.district || '').toLowerCase().replace(/_/g, ' '))
     );
 
     // Group AWS stations by district and aggregate rainfall metrics
@@ -765,7 +797,11 @@ export async function GET(req: NextRequest) {
       // Only track districts with any measurable rainfall
       if (bestRainRate > 0 || bestCum24h > 10) {
         const distName = (stnList[0]?.DISTRICT || distKey).replace(/_/g, ' ');
-        const stateName = (stnList[0]?.STATE || '').replace(/_/g, ' ');
+        let stateName = (stnList[0]?.STATE || geo.state || '').replace(/_/g, ' ').trim();
+        if (!stateName || stateName.toLowerCase() === 'india') {
+          const closest = getClosestDistrictByCoordinates(geo.lat, geo.lng);
+          stateName = closest.state;
+        }
         districtRainMetrics.set(distKey, {
           districtName: distName,
           stateName,
@@ -791,21 +827,20 @@ export async function GET(req: NextRequest) {
       let pluvialFloodRisk: PluvialFloodZone['pluvialFloodRisk'];
       if (rainRateMmH >= 70 || cum24hMm >= 150) {
         pluvialFloodRisk = 'CRITICAL';
-      } else if (rainRateMmH >= 25 || cum24hMm >= 75) {
+      } else if (rainRateMmH >= 15 || cum24hMm >= 40) {
         pluvialFloodRisk = 'HIGH';
-      } else {
+      } else if (rainRateMmH >= 2 || cum24hMm >= 10) {
         pluvialFloodRisk = 'MODERATE';
+      } else {
+        pluvialFloodRisk = 'LOW';
       }
-
-      // Only show CRITICAL and HIGH on the map by default (same as hazard events)
-      if (pluvialFloodRisk === 'MODERATE') continue;
 
       // Trend: RISING if both hourly and 24h are significant, else STABLE
       const trend: PluvialFloodZone['trend'] =
         (rainRateMmH >= 25 && cum24hMm >= 75) ? 'RISING' : 'STABLE';
 
       // Determine if this district has an active cyclone/severe event from IMD
-      const hasCycloneEvent = activeCycloneDistricts.has(districtName.toLowerCase());
+      const hasCycloneEvent = activeCycloneDistricts.has((districtName || '').toLowerCase());
 
       // Drainage/context label: only reference cyclone if genuinely active
       const drainageContext = hasCycloneEvent
@@ -860,11 +895,6 @@ export async function GET(req: NextRequest) {
         ],
       });
     }
-    // Limit to top 20 worst zones by rainfall intensity to prevent map clutter
-    pluvialFloodZones.sort((a, b) => b.liveRainRateMmH - a.liveRainRateMmH || b.cumulativeRain24hMm - a.cumulativeRain24hMm);
-    const trimmedPluvialZones = pluvialFloodZones.slice(0, 20);
-    // Top 20 worst zones served as filteredPluvial downstream
-
     // Sort by hazard priority: CYCLONE & RED ALERTS strictly at the top!
     function getHazardPriorityScore(ev: DerivedHazardEvent): number {
       let score = 0;
@@ -888,23 +918,27 @@ export async function GET(req: NextRequest) {
 
     // Filter events according to request parameters
     let filteredEvents = hazardEvents;
-    let filteredPluvial = trimmedPluvialZones;
+    let filteredPluvial = [...pluvialFloodZones];
 
     if (stateFilter && stateFilter !== 'All India' && stateFilter !== 'All States') {
-      filteredEvents = filteredEvents.filter(e => e.state.toLowerCase().includes(stateFilter.toLowerCase()));
-      filteredPluvial = filteredPluvial.filter(z => z.state.toLowerCase().includes(stateFilter.toLowerCase()));
+      filteredEvents = filteredEvents.filter(e => (e.state || '').toLowerCase().includes(stateFilter.toLowerCase()));
+      filteredPluvial = filteredPluvial.filter(z => (z.state || '').toLowerCase().includes(stateFilter.toLowerCase()));
     }
 
+    // Sort and limit pluvial flood zones by rain intensity and volume
+    filteredPluvial.sort((a, b) => b.liveRainRateMmH - a.liveRainRateMmH || b.cumulativeRain24hMm - a.cumulativeRain24hMm);
+    filteredPluvial = filteredPluvial.slice(0, 20);
+
     if (districtFilter && districtFilter !== 'All Districts') {
-      filteredEvents = filteredEvents.filter(e => e.district.toLowerCase().includes(districtFilter.toLowerCase()));
+      filteredEvents = filteredEvents.filter(e => (e.district || '').toLowerCase().includes(districtFilter.toLowerCase()));
     }
 
     if (categoryFilter && ['CYCLONE', 'CLOUDBURST', 'HAIL', 'VERY_HEAVY_RAIN', 'THUNDERSTORM', 'SEVERE_WEATHER', 'BACKGROUND'].includes(categoryFilter)) {
       filteredEvents = filteredEvents.filter(e => e.category === categoryFilter);
     }
 
-    // Default view: ONLY render RED and ORANGE severity (severe events) unless showAllActivity is requested
-    const severeEvents = filteredEvents.filter(e => e.isSevere);
+    // Default view: render active meteorological hazard events (excluding routine background)
+    const severeEvents = filteredEvents.filter(e => e.category !== 'BACKGROUND' || e.isSevere);
     const displayedEvents = showAllActivity ? filteredEvents : severeEvents;
 
     // Aggregate metrics
@@ -961,14 +995,17 @@ export async function GET(req: NextRequest) {
       pluvialFloodZones: filteredPluvial,
     }, {
       headers: {
-        'Cache-Control': 'public, max-age=60, stale-while-revalidate=30',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
       }
     });
 
   } catch (err: any) {
+    console.error('[Live Hazards Route Error]', err);
     return NextResponse.json({
       status: 'ERROR',
-      message: err.message || 'Failed to transform IMD hydromet hazard layer',
+      message: err.stack || err.message || 'Failed to transform IMD hydromet hazard layer',
       events: [],
     }, { status: 500 });
   }

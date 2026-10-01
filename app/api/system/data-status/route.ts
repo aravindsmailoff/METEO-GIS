@@ -50,8 +50,8 @@ export async function GET(req: NextRequest) {
       dataAgeMinutes: isLive ? Math.max(1, Math.round((Date.now() - awsRes.lastFetched) / 60000)) : 999,
       updateIntervalMinutes: 15,
       recordsCount: awsRes.stations?.length || 0,
-      endpoint: 'https://api.imd.gov.in/api/v1/aws_data',
-      protocol: 'HTTPS REST (X-API-KEY + OAuth JWT)',
+      endpoint: 'https://reactjs.imd.gov.in/geoserver/wfs?typename=imd:aws_data_layer',
+      protocol: 'OGC WFS 1.1.0 GeoJSON (Live Ground Ingestion)',
       latencyMs: latAws,
       details: isLive 
         ? `${awsRes.stations.length} official surface rain gauges and meteorological stations reporting active observations across India.` 
@@ -69,8 +69,8 @@ export async function GET(req: NextRequest) {
       dataAgeMinutes: 999,
       updateIntervalMinutes: 15,
       recordsCount: 0,
-      endpoint: 'https://api.imd.gov.in/api/v1/aws_data',
-      protocol: 'HTTPS REST',
+      endpoint: 'https://reactjs.imd.gov.in/geoserver/wfs?typename=imd:aws_data_layer',
+      protocol: 'OGC WFS 1.1.0 GeoJSON',
       latencyMs: Date.now() - t0,
       details: `Connection failed: ${err.message}`,
     });
@@ -94,8 +94,8 @@ export async function GET(req: NextRequest) {
       dataAgeMinutes: isLive ? Math.max(1, Math.round((Date.now() - ncRes.lastFetched) / 60000)) : 999,
       updateIntervalMinutes: 60,
       recordsCount: ncRes.nowcasts?.length || 0,
-      endpoint: 'https://api.imd.gov.in/api/v1/districtnowcast',
-      protocol: 'HTTPS REST (X-API-KEY + OAuth JWT)',
+      endpoint: 'https://reactjs.imd.gov.in/geoserver/wfs?typename=imd:NowcastWarningDistrict',
+      protocol: 'OGC WFS 1.1.0 GeoJSON (Live Convective Ingestion)',
       latencyMs: latNc,
       details: isLive ? `Hyperlocal convective nowcasts active for ${ncRes.nowcasts.length} administrative districts.` : 'Nowcast API offline.',
     });
@@ -111,8 +111,8 @@ export async function GET(req: NextRequest) {
       dataAgeMinutes: 999,
       updateIntervalMinutes: 60,
       recordsCount: 0,
-      endpoint: 'https://api.imd.gov.in/api/v1/districtnowcast',
-      protocol: 'HTTPS REST',
+      endpoint: 'https://reactjs.imd.gov.in/geoserver/wfs?typename=imd:NowcastWarningDistrict',
+      protocol: 'OGC WFS 1.1.0 GeoJSON',
       latencyMs: Date.now() - t1,
       details: `Connection failed: ${err.message}`,
     });
@@ -136,8 +136,8 @@ export async function GET(req: NextRequest) {
       dataAgeMinutes: isLive ? Math.max(1, Math.round((Date.now() - warnRes.lastFetched) / 60000)) : 999,
       updateIntervalMinutes: 180,
       recordsCount: warnRes.warnings?.length || 0,
-      endpoint: 'https://api.imd.gov.in/api/v1/districtwarning',
-      protocol: 'HTTPS REST (X-API-KEY + OAuth JWT)',
+      endpoint: 'https://reactjs.imd.gov.in/geoserver/wfs?typename=imd:district_warnings_india',
+      protocol: 'OGC WFS 1.1.0 GeoJSON (Live Synoptic Ingestion)',
       latencyMs: latWarn,
       details: isLive ? `Color-coded 5-day disaster warning bulletins active for ${warnRes.warnings.length} districts.` : 'Warning API offline.',
     });

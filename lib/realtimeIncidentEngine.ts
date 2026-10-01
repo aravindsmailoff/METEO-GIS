@@ -277,7 +277,7 @@ function getFreshnessStatus(ageMinutes: number): DataFreshnessStatus {
 /**
  * Executes Scheduled 5-Minute Ingestion & Validation Cycle
  */
-export async function runIngestionCycle(): Promise<{
+export async function runIngestionCycle(forceRefresh = false): Promise<{
   activeIncidents: RealtimeIncident[];
   expiredIncidents: RealtimeIncident[];
   audit: DataHealthAudit;
@@ -286,9 +286,9 @@ export async function runIngestionCycle(): Promise<{
   auditState.lastCheckTimestampMs = nowMs;
 
   const [awsRes, nowcastRes, warningRes] = await Promise.all([
-    getLiveIMDAwsData(),
-    getLiveIMDDistrictNowcast(),
-    getLiveIMDDistrictWarning(),
+    getLiveIMDAwsData(forceRefresh),
+    getLiveIMDDistrictNowcast(forceRefresh),
+    getLiveIMDDistrictWarning(forceRefresh),
   ]);
 
   const receivedIso = new Date().toISOString();
@@ -687,6 +687,16 @@ export async function runIngestionCycle(): Promise<{
   }
 
   // ── Deduplication & Lifecycle Update ──
+  // Check for expired incidents or incidents no longer active in the live IMD bulletin
+  for (const [id, inc] of auditState.incidentsMap.entries()) {
+    if (!currentIncidents.has(id) || inc.valid_until_epoch < nowMs) {
+      inc.status = 'EXPIRED';
+      auditState.expiredIncidentsMap.set(id, inc);
+      auditState.incidentsMap.delete(id);
+      expiredCount++;
+    }
+  }
+
   currentIncidents.forEach((inc, id) => {
     if (auditState.incidentsMap.has(id)) {
       inc.status = 'UPDATED';
@@ -696,16 +706,6 @@ export async function runIngestionCycle(): Promise<{
       newRecords++;
     }
     auditState.incidentsMap.set(id, inc);
-  });
-
-  // Check for expired incidents
-  auditState.incidentsMap.forEach((inc, id) => {
-    if (inc.valid_until_epoch < nowMs) {
-      inc.status = 'EXPIRED';
-      auditState.expiredIncidentsMap.set(id, inc);
-      auditState.incidentsMap.delete(id);
-      expiredCount++;
-    }
   });
 
   auditState.totalRecordsIngested = (awsRes.stations?.length || 0) + (nowcastRes.nowcasts?.length || 0) + (warningRes.warnings?.length || 0);
@@ -791,14 +791,15 @@ export async function getRealtimeIncidents(options: {
   state?: string;
   district?: string;
   mode?: 'LIVE' | 'HISTORICAL';
+  forceRefresh?: boolean;
 } = {}): Promise<{
   incidents: RealtimeIncident[];
   expiredIncidents: RealtimeIncident[];
   audit: DataHealthAudit;
 }> {
-  // Always trigger fresh ingestion if cache is older than 5 minutes
-  if (Date.now() - auditState.lastCheckTimestampMs > 300000 || auditState.incidentsMap.size === 0) {
-    await runIngestionCycle();
+  // Always trigger fresh ingestion if cache is older than 5 minutes or forceRefresh is true
+  if (options.forceRefresh || Date.now() - auditState.lastCheckTimestampMs > 300000 || auditState.incidentsMap.size === 0) {
+    await runIngestionCycle(options.forceRefresh);
   }
 
   let list = Array.from(auditState.incidentsMap.values());

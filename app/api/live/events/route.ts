@@ -39,12 +39,13 @@ export interface AuthoritativeWeatherEvent {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const stateFilter = searchParams.get('state');
+  const forceRefresh = searchParams.get('fresh') === '1' || searchParams.get('refresh') === 'true';
 
   try {
     const [awsResult, nowcastResult, warningResult] = await Promise.all([
-      getLiveIMDAwsData(),
-      getLiveIMDDistrictNowcast(),
-      getLiveIMDDistrictWarning(),
+      getLiveIMDAwsData(forceRefresh),
+      getLiveIMDDistrictNowcast(forceRefresh),
+      getLiveIMDDistrictWarning(forceRefresh),
     ]);
 
     const activeEvents: AuthoritativeWeatherEvent[] = [];
@@ -221,7 +222,7 @@ export async function GET(req: NextRequest) {
       }
     }
 
-      const { incidents: realtimeIncidents, expiredIncidents, audit } = await getRealtimeIncidents({ state: stateFilter || undefined });
+      const { incidents: realtimeIncidents, expiredIncidents, audit } = await getRealtimeIncidents({ state: stateFilter || undefined, forceRefresh });
 
       return NextResponse.json({
         status: 'OK',

@@ -23,6 +23,9 @@ function bboxToTile(minx: number, miny: number, maxx: number, maxy: number) {
   return { z, x, y };
 }
 
+// In-memory tile cache (LRU-style capped at 600 tiles)
+const tileCache = new Map<string, { buffer: ArrayBuffer; contentType: string; source: string }>();
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const token = process.env.BHUVAN_TOKEN || process.env.NEXT_PUBLIC_BHUVAN_TOKEN || '909874bb1f273c7637c14ddf9f07122d9ec2c61d';
@@ -54,6 +57,19 @@ export async function GET(req: NextRequest) {
     if (bboxParts.length === 4 && !bboxParts.some(isNaN)) {
       tileCoords = bboxToTile(bboxParts[0], bboxParts[1], bboxParts[2], bboxParts[3]);
     }
+  }
+
+  // Fast check: return from in-memory cache if available
+  const cacheKey = `${layer}:${tileCoords.z}:${tileCoords.x}:${tileCoords.y}:${width}x${height}`;
+  const hit = tileCache.get(cacheKey);
+  if (hit) {
+    return new NextResponse(hit.buffer, {
+      headers: {
+        'Content-Type': hit.contentType,
+        'Cache-Control': 'public, max-age=604800, immutable',
+        'X-Source': hit.source + '_CACHE',
+      },
+    });
   }
 
   // 1. If satellite imagery requested
@@ -90,9 +106,15 @@ export async function GET(req: NextRequest) {
 
     if (res.ok && res.headers.get('Content-Type')?.includes('image')) {
       const buffer = await res.arrayBuffer();
+      const contentType = res.headers.get('Content-Type') || 'image/png';
+      if (tileCache.size > 600) {
+        const firstKey = tileCache.keys().next().value;
+        if (firstKey) tileCache.delete(firstKey);
+      }
+      tileCache.set(cacheKey, { buffer, contentType, source: 'ISRO_BHUVAN_WMS_LIVE' });
       return new NextResponse(buffer, {
         headers: {
-          'Content-Type': res.headers.get('Content-Type') || 'image/png',
+          'Content-Type': contentType,
           'Cache-Control': 'public, max-age=86400',
           'X-Source': 'ISRO_BHUVAN_WMS_LIVE',
         },
@@ -108,6 +130,11 @@ export async function GET(req: NextRequest) {
     });
     if (osmRes.ok) {
       const buffer = await osmRes.arrayBuffer();
+      if (tileCache.size > 600) {
+        const firstKey = tileCache.keys().next().value;
+        if (firstKey) tileCache.delete(firstKey);
+      }
+      tileCache.set(cacheKey, { buffer, contentType: 'image/png', source: 'ISRO_BHUVAN_THEMATIC_2D' });
       return new NextResponse(buffer, {
         headers: {
           'Content-Type': 'image/png',

@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Technical Approach Architecture Diagram</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap');
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    width: 1920px;
+    height: 1080px;
+    background: #f8fafc;
+    font-family: 'Inter', sans-serif;
+    color: #0f172a;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+
+  /* Header */
+  .header {
+    height: 90px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 40px;
+    background: #ffffff;
+    border-bottom: 2px solid #e2e8f0;
+  }
+
+  .badge-app {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #0f172a;
+    color: #ffffff;
+    padding: 10px 22px;
+    border-radius: 9999px;
+    font-weight: 800;
+    font-size: 22px;
+    letter-spacing: -0.5px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15);
+  }
+
+  .badge-app span {
+    color: #38bdf8;
+  }
+
+  .header-center {
+    text-align: center;
+  }
+
+  .header-title {
+    font-size: 34px;
+    font-weight: 900;
+    letter-spacing: 1.5px;
+    color: #000000;
+    line-height: 1.1;
+  }
+
+  .header-subtitle {
+    font-size: 16px;
+    font-weight: 700;
+    color: #1e293b;
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+  }
+
+  .header-subtitle span {
+    color: #0284c7;
+  }
+
+  .sih-badge {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .sih-text {
+    text-align: right;
+    line-height: 1.1;
+  }
+
+  .sih-title {
+    font-size: 18px;
+    font-weight: 900;
+    color: #1e293b;
+    letter-spacing: 0.5px;
+  }
+
+  .sih-year {
+    font-size: 20px;
+    font-weight: 900;
+    color: #0284c7;
+  }
+
+  /* Main Workspace Layout */
+  .main-layout {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 200px 1fr 390px;
+    gap: 16px;
+    padding: 16px 30px;
+    align-items: stretch;
+  }
+
+  /* Left Column: Actors */
+  .left-col {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    padding: 8px 0;
+  }
+
+  .actor-card {
+    background: #ffffff;
+    border: 2px solid #0284c7;
+    border-radius: 12px;
+    padding: 14px 12px;
+    box-shadow: 0 4px 12px rgba(2, 132, 199, 0.08);
+    position: relative;
+  }
+
+  .actor-card::after {
+    content: '';
+    position: absolute;
+    right: -18px;
+    top: 50%;
+    width: 16px;
+    height: 2px;
+    background: #0284c7;
+  }
+
+  .actor-card::before {
+    content: '';
+    position: absolute;
+    right: -20px;
+    top: calc(50% - 4px);
+    width: 0;
+    height: 0;
+    border-top: 5px solid transparent;
+    border-bottom: 5px solid transparent;
+    border-left: 7px solid #0284c7;
+  }
+
+  .actor-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1.5px solid #e2e8f0;
+    padding-bottom: 6px;
+  }
+
+  .actor-icon {
+    width: 32px;
+    height: 32px;
+    background: #e0f2fe;
+    color: #0284c7;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 900;
+  }
+
+  .actor-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.2;
+  }
+
+  .actor-subtitle {
+    font-size: 10px;
+    color: #0369a1;
+    font-weight: 700;
+  }
+
+  .actor-item {
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-top: 6px;
+    font-size: 10px;
+    line-height: 1.3;
+    color: #334155;
+  }
+
+  .actor-item strong {
+    color: #0f172a;
+    display: block;
+    font-size: 10.5px;
+  }
+
+  /* Center Container: Central Platform */
+  .center-container {
+    background: #ffffff;
+    border: 2px solid #0f172a;
+    border-radius: 14px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+    position: relative;
+  }
+
+  .platform-banner {
+    background: #0f172a;
+    color: #ffffff;
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    text-align: center;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .platform-banner span {
+    color: #38bdf8;
+    font-weight: 600;
+    font-size: 11px;
+    background: #1e293b;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+
+  .workflow-layers {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .layer-card {
+    border: 1.5px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 6px 10px;
+    background: #ffffff;
+    position: relative;
+  }
+
+  .layer-card.highlight {
+    border-color: #0284c7;
+    background: #f0f9ff;
+  }
+
+  .layer-card.accent {
+    border-color: #059669;
+    background: #f0fdf4;
+  }
+
+  .layer-card.dark {
+    border-color: #334155;
+    background: #f8fafc;
+  }
+
+  .layer-header {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 5px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .lh-blue { color: #0284c7; }
+  .lh-slate { color: #334155; }
+  .lh-green { color: #059669; }
+  .lh-indigo { color: #4f46e5; }
+  .lh-rose { color: #e11d48; }
+
+  .subgrid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+
+  .subgrid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+
+  .subgrid-1 {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .subbox {
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 5px 8px;
+  }
+
+  .subbox-title {
+    font-size: 10px;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.2;
+    margin-bottom: 2px;
+  }
+
+  .subbox-desc {
+    font-size: 8.5px;
+    color: #475569;
+    line-height: 1.25;
+  }
+
+  /* Feedback bar */
+  .feedback-bar {
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 9.5px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .feedback-arrow {
+    color: #38bdf8;
+    font-weight: 900;
+  }
+
+  /* Right Column: Authorities Actors & Tech Stack */
+  .right-col {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Authority Command Actors */
+  .auth-actors {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .auth-card {
+    background: #ffffff;
+    border: 1.5px solid #0284c7;
+    border-radius: 8px;
+    padding: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+  }
+
+  .auth-card-title {
+    font-size: 10.5px;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.2;
+    margin-bottom: 3px;
+  }
+
+  .auth-card-desc {
+    font-size: 8.5px;
+    color: #475569;
+    line-height: 1.25;
+  }
+
+  /* Tech Stack Notebook */
+  .notebook {
+    background: #ffffff;
+    border: 2px solid #1e293b;
+    border-radius: 12px;
+    padding: 12px 14px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    position: relative;
+  }
+
+  /* Notebook rings */
+  .rings {
+    position: absolute;
+    top: -10px;
+    left: 14px;
+    right: 14px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .ring {
+    width: 8px;
+    height: 18px;
+    background: #94a3b8;
+    border: 2px solid #475569;
+    border-radius: 4px;
+  }
+
+  .notebook-title {
+    font-size: 16px;
+    font-weight: 900;
+    color: #0f172a;
+    letter-spacing: 1px;
+    text-align: center;
+    margin-top: 4px;
+    margin-bottom: 10px;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 6px;
+  }
+
+  .stack-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+  }
+
+  .stack-row {
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 6px 8px;
+    background: #f8fafc;
+  }
+
+  .stack-cat {
+    font-size: 10px;
+    font-weight: 800;
+    color: #0284c7;
+    margin-bottom: 2px;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .stack-techs {
+    font-size: 9px;
+    color: #1e293b;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  /* Prototype links */
+  .proto-card {
+    background: #0f172a;
+    color: #ffffff;
+    border-radius: 8px;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .proto-label {
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #38bdf8;
+  }
+
+  .proto-badges {
+    display: flex;
+    gap: 8px;
+  }
+
+  .proto-badge {
+    background: #1e293b;
+    border: 1px solid #334155;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    color: #f1f5f9;
+  }
+
+  /* Bottom blue bar */
+  .footer-bar {
+    height: 34px;
+    background: #0284c7;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 40px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+  }
+</style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <div class="header">
+    <div class="badge-app">
+      METEOGIS <span>COMMAND</span>
+    </div>
+
+    <div class="header-center">
+      <div class="header-title">TECHNICAL APPROACH</div>
+      <div class="header-subtitle">
+        Data <span>→</span> AI Intelligence <span>→</span> Disaster Command <span>→</span> Tactical Dispatch
+      </div>
+    </div>
+
+    <div class="sih-badge">
+      <div class="sih-text">
+        <div class="sih-title">SMART INDIA HACKATHON</div>
+        <div class="sih-year">2026</div>
+      </div>
+      <div style="width: 44px; height: 44px; border-radius: 8px; background: linear-gradient(135deg, #0284c7, #059669); display: flex; align-items: center; justify-content: center; color: white; font-weight: 900; font-size: 18px;">
+        SIH
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Body Content -->
+  <div class="main-layout">
+
+    <!-- Left Column: Authority Field Actors -->
+    <div class="left-col">
+      <!-- Actor 1: Emergency Fleet -->
+      <div class="actor-card">
+        <div class="actor-header">
+          <div class="actor-icon">🚨</div>
+          <div>
+            <div class="actor-title">EMERGENCY FLEET</div>
+            <div class="actor-subtitle">Ambulance / NDRF / SDRF / BRO</div>
+          </div>
+        </div>
+        <div class="actor-item">
+          <strong>Live GPS Telemetry</strong>
+          Continuous tactical position streaming to DEOC
+        </div>
+        <div class="actor-item">
+          <strong>Hazard Geofence & Detour</strong>
+          Real-time reroute prompt around active landslides
+        </div>
+      </div>
+
+      <!-- Actor 2: Field Incident Officer -->
+      <div class="actor-card">
+        <div class="actor-header">
+          <div class="actor-icon">🛡️</div>
+          <div>
+            <div class="actor-title">FIELD OFFICER</div>
+            <div class="actor-subtitle">District Emergency Terminal</div>
+          </div>
+        </div>
+        <div class="actor-item">
+          <strong>Damage & Hazard Evidence</strong>
+          Geo-tagged photos, ground slip reports
+        </div>
+        <div class="actor-item">
+          <strong>Offline-First Synchronization</strong>
+          Local mesh / VHF caching, auto-sync when online
+        </div>
+      </div>
+    </div>
+
+    <!-- Center: Main Architecture Box -->
+    <div class="center-container">
+      <div class="platform-banner">
+        CENTRAL GOVERNMENT DISASTER COMMAND PLATFORM (METEOGIS)
+        <span>AUTHORITIES ONLY • ENTERPRISE GIS ENGINE</span>
+      </div>
+
+      <div class="workflow-layers">
+
+        <!-- Layer 1: Ingestion -->
+        <div class="layer-card">
+          <div class="layer-header lh-blue">
+            <span>1. MULTI-AGENCY DATA INGESTION & PREPROCESSING</span>
+          </div>
+          <div class="subgrid-4">
+            <div class="subbox">
+              <div class="subbox-title">Doppler Weather Radar</div>
+              <div class="subbox-desc">34 IMD DWR stations, 250km surveillance, 100km QPE precipitation rings</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">In-Situ Telemetry</div>
+              <div class="subbox-desc">1,165+ IMD AWS/ARG automatic rain stations, barometric pressure, wind</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">Earth Observation Satellites</div>
+              <div class="subbox-desc">ISRO INSAT-3DR rapid-scan infrared, NASA GPM IMERG 30-min rainfall</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">Geodesy & Field Feeds</div>
+              <div class="subbox-desc">Copernicus GLO-30 DEM, InSAR mm/yr creep, Citizen SOS distress beacons</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Layer 2: Cleaning & Spatial -->
+        <div class="layer-card">
+          <div class="layer-header lh-slate">
+            <span>2. DATA CLEANING & SPATIAL PROCESSING</span>
+          </div>
+          <div class="subgrid-3">
+            <div class="subbox">
+              <div class="subbox-title">Radar QC & Attenuation Filter</div>
+              <div class="subbox-desc">Beam blockage correction, ground clutter removal, anomalous propagation filter</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">PostGIS Map Matching</div>
+              <div class="subbox-desc">Spatial topological snap to OpenStreetMap arterial highway network</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">Terrain Feature Extraction</div>
+              <div class="subbox-desc">Copernicus slope gradient, pluvial sump depression dips, drainage basins</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Layer 3: Storage -->
+        <div class="layer-card dark">
+          <div class="layer-header lh-indigo">
+            <span>3. DATA STORAGE LAYER</span>
+          </div>
+          <div class="subgrid-1">
+            <div class="subbox" style="background: #ffffff; border-color: #94a3b8;">
+              <div class="subbox-title" style="font-size: 11px;">PostgreSQL 16 + PostGIS 3.4 Spatial Database (Dual-Mode Local / Live)</div>
+              <div class="subbox-desc" style="font-size: 9.5px;">Stores OSM road network graph, active landslide blockades, relief shelters, isolated hamlets, rain gauges, citizen SOS points, and CAP emergency alerts.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Layer 4: AI/ML Layer -->
+        <div class="layer-card highlight">
+          <div class="layer-header lh-blue">
+            <span>4. AI / ML INTELLIGENCE & EXPLAINABILITY LAYER</span>
+          </div>
+          <div class="subgrid-3">
+            <div class="subbox">
+              <div class="subbox-title">XGBoost Landslide Susceptibility</div>
+              <div class="subbox-desc">Predicts slope failure probability with real-time SHAP feature attribution breakdown</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">Deterministic Countdown Engine</div>
+              <div class="subbox-desc">Operational evacuation windows: Cloudburst (25-50m), Hail (40-80m), Cyclone (8-20h)</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">Hamlet Cutoff & Isolation Analytics</div>
+              <div class="subbox-desc">Calculates village isolation probability, medical/food supply buffer hours, nearest refuge</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Layer 5: Decision & Routing -->
+        <div class="layer-card accent">
+          <div class="layer-header lh-green">
+            <span>5. DISASTER DECISION & VALHALLA ROUTING ENGINE</span>
+          </div>
+          <div class="subgrid-4">
+            <div class="subbox">
+              <div class="subbox-title">Disaster-Safe Routing</div>
+              <div class="subbox-desc">Valhalla graph engine avoids PostGIS active landslides & rockfalls</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">Responder Priority Dispatch</div>
+              <div class="subbox-desc">Rule: Ambulance > NDRF Search & Rescue > BRO Road Clearance</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">Dynamic Geofence Alerts</div>
+              <div class="subbox-desc">Automated threat perimeters warning vehicles approaching hazard zones</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">Non-Road Egress Allocation</div>
+              <div class="subbox-desc">Ropeway coordinates, mountain ridge foot trails, drone drop corridors</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Layer 6: Application Layer -->
+        <div class="layer-card">
+          <div class="layer-header lh-rose">
+            <span>6. APPLICATION LAYER (AUTHORITY COMMAND & FIELD TEAMS)</span>
+          </div>
+          <div class="subgrid-3">
+            <div class="subbox">
+              <div class="subbox-title">DEOC / SDMA Command Center</div>
+              <div class="subbox-desc">Next.js 16 Web Dashboard: Live radar overlays, convective nowcasts, scenario stress testing</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">Tactical Responder Terminal</div>
+              <div class="subbox-desc">Ambulance & NDRF safe-routing navigation, hazard proximity alerts, route scoring</div>
+            </div>
+            <div class="subbox">
+              <div class="subbox-title">Field Officer Incident App</div>
+              <div class="subbox-desc">Offline hazard logging, citizen SOS beacon triage, CAP v1.2 emergency alert feeds</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Layer 7: Feedback Loop -->
+        <div class="feedback-bar">
+          <span style="font-weight: 800; letter-spacing: 0.5px;">7. CONTINUOUS FEEDBACK & RECALIBRATION LOOP:</span>
+          <span>Field SOS Beacons <span class="feedback-arrow">→</span> Live Telemetry <span class="feedback-arrow">→</span> PostGIS Dynamic State <span class="feedback-arrow">→</span> Retrain XGBoost Risk <span class="feedback-arrow">→</span> Real-Time Detour Recalculation</span>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Right Column: Command Actors & Tech Stack -->
+    <div class="right-col">
+
+      <!-- Authority Command Actors -->
+      <div class="auth-actors">
+        <div class="auth-card">
+          <div class="auth-card-title">DISASTER COMMANDER</div>
+          <div class="auth-card-desc">Reviews district isolation risks, authorizes CAP alerts & relief deployments</div>
+        </div>
+        <div class="auth-card" style="border-color: #059669;">
+          <div class="auth-card-title" style="color: #059669;">RESCUE & RELIEF COMMAND</div>
+          <div class="auth-card-desc">NDRF rescue units, BRO road clearance machinery, drone relief airdrops</div>
+        </div>
+      </div>
+
+      <!-- Tech Stack Notebook Card -->
+      <div class="notebook">
+        <div class="rings">
+          <div class="ring"></div><div class="ring"></div><div class="ring"></div>
+          <div class="ring"></div><div class="ring"></div><div class="ring"></div>
+          <div class="ring"></div><div class="ring"></div><div class="ring"></div>
+        </div>
+
+        <div class="notebook-title">TECH STACK</div>
+
+        <div class="stack-grid">
+          <div class="stack-row">
+            <div class="stack-cat">Frontend & Command</div>
+            <div class="stack-techs">Next.js 16 (App Router), React 19, Leaflet.js, Tailwind CSS, Lucide Icons</div>
+          </div>
+
+          <div class="stack-row">
+            <div class="stack-cat">AI & ML Models</div>
+            <div class="stack-techs">Python 3.11, XGBoost, SHAP Explainer, Scikit-learn, NumPy</div>
+          </div>
+
+          <div class="stack-row">
+            <div class="stack-cat">GIS & Disaster Routing</div>
+            <div class="stack-techs">Valhalla C++ Routing Engine, pyvalhalla Actor, OpenStreetMap (OSM)</div>
+          </div>
+
+          <div class="stack-row">
+            <div class="stack-cat">Spatial Database</div>
+            <div class="stack-techs">PostgreSQL 16 + PostGIS 3.4 (Road topology, spatial indexes, CAP alerts)</div>
+          </div>
+
+          <div class="stack-row">
+            <div class="stack-cat">Authoritative Data Feeds</div>
+            <div class="stack-techs">IMD Doppler Radar, ISRO Bhuvan / INSAT-3DR, NASA GPM IMERG, Copernicus DEM</div>
+          </div>
+        </div>
+
+        <!-- Working Prototype -->
+        <div class="proto-card" style="margin-top: 10px;">
+          <div class="proto-label">WORKING PROTOTYPE</div>
+          <div class="proto-badges">
+            <div class="proto-badge">GitHub Live</div>
+            <div class="proto-badge" style="color: #ef4444;">YouTube Demo</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- Bottom Blue Bar -->
+  <div class="footer-bar">
+    <div>DISASTER EARLY WARNING & RESILIENT EMERGENCY EVACUATION PLATFORM</div>
+    <div>SMART INDIA HACKATHON 2026 • NORTH EASTERN REGION (NER)</div>
+    <div>3</div>
+  </div>
+
+</body>
+</html>

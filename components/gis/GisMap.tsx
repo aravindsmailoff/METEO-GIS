@@ -887,10 +887,6 @@ export const GisMap: React.FC<GisMapProps> = ({
             lineJoin: 'round',
           });
 
-          roadLine.bindTooltip(`<strong>${p.road_name}</strong><br>Status: <span style="font-weight:bold; color:${lineColor}">${p.status}</span>`, {
-            sticky: true,
-          });
-
           roadLine.on('click', () => {
             setSelectedRoadSegment(p);
           });

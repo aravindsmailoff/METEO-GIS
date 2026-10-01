@@ -31,11 +31,12 @@ export function classifyRainfall(mm24h: number, mm1h: number): 'NO_RAIN' | 'LIGH
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const onlyActiveRain = searchParams.get('active_only') !== 'false';
   const stateFilter = searchParams.get('state');
+  const onlyActiveRain = searchParams.get('active_only') !== 'false';
+  const forceRefresh = searchParams.get('fresh') === '1' || searchParams.get('refresh') === 'true';
 
   try {
-    const { stations, lastFetched, isLive } = await getLiveIMDAwsData();
+    const { stations, lastFetched, isLive } = await getLiveIMDAwsData(forceRefresh);
     const finalStations = stations || [];
 
     if (!finalStations || finalStations.length === 0) {

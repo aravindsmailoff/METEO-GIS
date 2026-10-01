@@ -14,11 +14,13 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const stateFilter = searchParams.get('state');
   const districtFilter = searchParams.get('district');
+  const forceRefresh = searchParams.get('fresh') === '1' || searchParams.get('refresh') === 'true';
 
   try {
     const { incidents, audit } = await getRealtimeIncidents({
       state: stateFilter || undefined,
       district: districtFilter || undefined,
+      forceRefresh,
     });
 
     const realMapped: HazardIncident[] = incidents.map((inc) => {

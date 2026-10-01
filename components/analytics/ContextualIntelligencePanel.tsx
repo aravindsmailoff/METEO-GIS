@@ -87,16 +87,44 @@ export const ContextualIntelligencePanel: React.FC<ContextualIntelligencePanelPr
   const warning = ev?.districtWarning;
   const nowcast = ev?.districtNowcast;
 
-  // Determine current drill-down level hierarchy: INDIA -> STATE -> DISTRICT -> STATION
-  const hasStation = Boolean(stn?.stationName);
-  const hasDistrict = Boolean(ev?.district || (selectedState !== 'All India' && primaryEvent?.district));
-  const isStateLevel = selectedState !== 'All India' && !ev?.district;
-  const isNationalLevel = selectedState === 'All India' && !ev;
+  // Guard to ensure evidence strictly belongs to the currently selected state (Zero cross-state leak)
+  const isEvMatchingSelectedState = Boolean(
+    ev && (
+      !selectedState || 
+      selectedState === 'All India' || 
+      (ev.state && (
+        ev.state.toLowerCase().includes(selectedState.toLowerCase()) ||
+        selectedState.toLowerCase().includes(ev.state.toLowerCase())
+      ))
+    )
+  );
 
-  const currentLevelTitle = hasStation
+  // Active target district & state for contextual data binding
+  const activeState = (isEvMatchingSelectedState && ev?.state) 
+    ? ev.state 
+    : (selectedState && selectedState !== 'All India')
+    ? selectedState
+    : (primaryEvent?.state || '');
+
+  const activeDistrict = (isEvMatchingSelectedState && ev?.district && ev.district !== selectedState)
+    ? ev.district
+    : (selectedState && selectedState !== 'All India')
+    ? (primaryEvent?.state && (
+        primaryEvent.state.toLowerCase().includes(selectedState.toLowerCase()) ||
+        selectedState.toLowerCase().includes(primaryEvent.state.toLowerCase())
+      ) ? primaryEvent.district : '')
+    : (primaryEvent?.district || '');
+
+  // Determine current drill-down level hierarchy: INDIA -> STATE -> DISTRICT -> STATION
+  const hasStation = Boolean(stn?.stationName && isEvMatchingSelectedState);
+  const hasDistrict = Boolean(activeDistrict);
+  const isStateLevel = selectedState !== 'All India' && !activeDistrict;
+  const isNationalLevel = selectedState === 'All India' && !activeDistrict;
+
+  const currentLevelTitle = (hasDistrict && activeDistrict)
+    ? activeDistrict.toUpperCase()
+    : hasStation
     ? stn?.stationName?.toUpperCase()
-    : ev?.district
-    ? ev.district.toUpperCase()
     : selectedState !== 'All India'
     ? selectedState.toUpperCase()
     : 'ALL INDIA';
@@ -122,27 +150,31 @@ export const ContextualIntelligencePanel: React.FC<ContextualIntelligencePanelPr
     ? `Until ${primaryEvent.validUntilIST}`
     : cd.operationalWindowLabel;
 
-  // Active target district & state for contextual data binding
-  const activeState = ev?.state 
-    ? ev.state 
-    : (selectedState && selectedState !== 'All India')
-    ? selectedState
-    : (selectedState !== 'All India' ? primaryEvent?.state || '' : '');
-
-  const activeDistrict = ev?.district
-    ? ev.district
-    : (selectedState && selectedState !== 'All India')
-    ? (primaryEvent?.state && primaryEvent.state.toLowerCase() === selectedState.toLowerCase() ? primaryEvent.district : '')
-    : '';
-
   const activeTerritoryName = activeDistrict && activeState && !activeDistrict.toLowerCase().includes(activeState.toLowerCase())
     ? `${activeDistrict}, ${activeState}`
     : activeDistrict || activeState || (selectedState !== 'All India' ? selectedState : 'National Surveillance (All India)');
 
   // Compute localized basins matching the current active territory:
   const localizedBasins: PluvialFloodZone[] = React.useMemo(() => {
+    const baseList = pluvialZones || [];
+
+    // If selectedPluvialZone is set, ensure it is at the front of localizedBasins
+    if (selectedPluvialZone) {
+      const matched = baseList.filter(z => 
+        (activeDistrict && z.district?.toLowerCase().includes(activeDistrict.toLowerCase())) ||
+        (activeState && z.state?.toLowerCase().includes(activeState.toLowerCase())) ||
+        (selectedPluvialZone.district && z.district?.toLowerCase().includes(selectedPluvialZone.district.toLowerCase()))
+      );
+      const pool = matched.length > 0 ? matched : baseList;
+      const exists = pool.some(z => z.id === selectedPluvialZone.id);
+      if (!exists) {
+        return [selectedPluvialZone, ...pool];
+      }
+      return [selectedPluvialZone, ...pool.filter(z => z.id !== selectedPluvialZone.id)];
+    }
+
     // 1. If pluvialZones matching activeState or activeDistrict exist in passed list:
-    const matched = (pluvialZones || []).filter(z => 
+    const matched = baseList.filter(z => 
       (activeDistrict && z.district?.toLowerCase().includes(activeDistrict.toLowerCase())) ||
       (activeState && z.state?.toLowerCase().includes(activeState.toLowerCase()))
     );
@@ -200,9 +232,19 @@ export const ContextualIntelligencePanel: React.FC<ContextualIntelligencePanelPr
 
     // Default to passed pluvial zones
     return pluvialZones || [];
-  }, [pluvialZones, activeDistrict, activeState, ev, primaryEvent, stn]);
+  }, [pluvialZones, activeDistrict, activeState, ev, primaryEvent, stn, selectedPluvialZone]);
 
   const [internalHotspot, setInternalHotspot] = useState<CityHotspotPinpoint | any | null>(null);
+
+  useEffect(() => {
+    if (selectedPluvialZone) {
+      if (selectedPluvialZone.cityHotspots && selectedPluvialZone.cityHotspots.length > 0) {
+        setInternalHotspot(selectedPluvialZone.cityHotspots[0]);
+      } else {
+        setInternalHotspot(null);
+      }
+    }
+  }, [selectedPluvialZone]);
 
   // Active corridor (either explicitly selected pluvial zone or top prioritized basin with hotspots)
   const activeCorridor: PluvialFloodZone | null = useMemo(() => {

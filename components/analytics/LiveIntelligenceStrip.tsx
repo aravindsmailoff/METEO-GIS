@@ -40,7 +40,7 @@ export const LiveIntelligenceStrip: React.FC<LiveIntelligenceStripProps> = ({
     {
       id: 'aws',
       label: 'AWS Stations',
-      value: awsStationsCount ? awsStationsCount.toLocaleString() : '1,165',
+      value: awsStationsCount !== undefined && awsStationsCount > 0 ? awsStationsCount.toLocaleString() : '—',
       sub: 'Real-time telemetry',
       icon: Navigation,
       color: 'text-emerald-400',

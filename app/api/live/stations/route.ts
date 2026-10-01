@@ -50,8 +50,9 @@ export async function GET(req: NextRequest) {
     return Math.round(R * c * 10) / 10;
   };
 
+  const forceRefresh = searchParams.get('fresh') === '1' || searchParams.get('refresh') === 'true';
   try {
-    const { stations, lastFetched, isLive } = await getLiveIMDAwsData();
+    const { stations, lastFetched, isLive } = await getLiveIMDAwsData(forceRefresh);
 
     const finalStations = stations || [];
 

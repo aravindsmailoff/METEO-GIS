@@ -38,6 +38,16 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://gibs.earthdata.nasa.gov" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://gibs.earthdata.nasa.gov" />
+        <link rel="preconnect" href="https://server.arcgisonline.com" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://server.arcgisonline.com" />
+        <link rel="preconnect" href="https://services.arcgisonline.com" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://services.arcgisonline.com" />
+        <link rel="preconnect" href="https://bhuvan-vec1.nrsc.gov.in" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://bhuvan-vec1.nrsc.gov.in" />
+      </head>
       <body className="antialiased">
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}

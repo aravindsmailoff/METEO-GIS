@@ -668,6 +668,18 @@ body {
 .leaflet-popup-tip { background: var(--db-surface-2) !important; }
 .leaflet-popup-close-button { color: var(--db-text-secondary) !important; padding: 6px !important; }
 .leaflet-popup-close-button:hover { color: var(--db-text-primary) !important; }
+.leaflet-tooltip {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.leaflet-tooltip-top:before,
+.leaflet-tooltip-bottom:before,
+.leaflet-tooltip-left:before,
+.leaflet-tooltip-right:before {
+  display: none !important;
+}
 .leaflet-control-zoom {
   border: 1px solid var(--db-border) !important;
   border-radius: var(--db-radius) !important;

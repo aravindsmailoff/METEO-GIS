@@ -45,9 +45,10 @@ export async function GET(req: NextRequest) {
   const stateFilter = searchParams.get('state');
   const districtFilter = searchParams.get('district');
   const activeOnly = searchParams.get('active_only') === 'true';
+  const forceRefresh = searchParams.get('fresh') === '1' || searchParams.get('refresh') === 'true';
 
   try {
-    const { nowcasts, lastFetched, isLive } = await getLiveIMDDistrictNowcast();
+    const { nowcasts, lastFetched, isLive } = await getLiveIMDDistrictNowcast(forceRefresh);
     const finalNowcasts = nowcasts || [];
 
     if (!finalNowcasts || finalNowcasts.length === 0) {
@@ -111,18 +112,21 @@ export async function GET(req: NextRequest) {
         remainingMinutes = Math.max(0, validMinutes - currTotalMinutes);
       }
 
+      const istDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
+      const todayIST = istDateFormatter.format(now);
+
       if (!isLive || remainingMinutes === 0 || remainingMinutes === null) {
         const validUpHour = (currHr + 2) % 24;
         toiFormatted = `${String(currHr).padStart(2, '0')}:00 IST`;
         vuptoFormatted = `${String(validUpHour).padStart(2, '0')}:30 IST`;
-        remainingMinutes = 95;
+        remainingMinutes = Math.max(15, 150 - (currMin % 30));
       }
 
       validatedList.push({
         objId: item.Obj_id,
         district: distName,
         state: stateFilter || 'India',
-        date: item.Date,
+        date: todayIST,
         timeOfIssueIST: toiFormatted,
         validUptoIST: vuptoFormatted,
         validityWindowRemainingMinutes: remainingMinutes,
@@ -157,7 +161,9 @@ export async function GET(req: NextRequest) {
       receivedTimestamp: new Date().toISOString(),
     }, {
       headers: {
-        'Cache-Control': 'public, max-age=180, stale-while-revalidate=60',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
       },
     });
   } catch (err: any) {

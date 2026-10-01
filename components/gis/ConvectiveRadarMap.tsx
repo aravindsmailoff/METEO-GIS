@@ -278,13 +278,6 @@ export const ConvectiveRadarMap: React.FC<ConvectiveRadarMapProps> = ({
             fillColor: '#00e5ff',
             fillOpacity: 0.12,
           })
-          .bindTooltip(`
-            <div style="font-family: sans-serif; font-size: 10px; padding: 2px;">
-              <strong style="color: #00e5ff;">ISRO MOSDAC INSAT-3DR TIR-1 (10.8 µm)</strong><br/>
-              <span>Cloud-Top Temp: <strong>${cell.cloudTopTempC}°C</strong></span><br/>
-              <span>15-min Cooling: <strong>${cell.coolingRateK15min} K/15m</strong> (Glaciating)</span>
-            </div>
-          `, { sticky: true })
           .addTo(lg.bhuvanMosdac);
         }
       });

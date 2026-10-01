@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDataHealthAudit, runIngestionCycle } from '@/lib/realtimeIncidentEngine';
+import { getAgentStatus } from '@/lib/imdBackgroundAgent';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +20,8 @@ export async function GET(req: NextRequest) {
     const forceRefresh = searchParams.get('refresh') === 'true';
 
     let audit = getDataHealthAudit();
+    const agentStatusSnapshot = getAgentStatus();
+
     if (forceRefresh || audit.apiStatus !== 'CONNECTED' || audit.recordsReceived === 0) {
       const result = await runIngestionCycle();
       audit = result.audit;
@@ -27,12 +30,34 @@ export async function GET(req: NextRequest) {
         audit,
         activeIncidentsCount: result.activeIncidents.length,
         expiredIncidentsCount: result.expiredIncidents.length,
+        backgroundAgent: {
+          isRunning: agentStatusSnapshot.isRunning,
+          lastSuccessfulRefresh: agentStatusSnapshot.lastSuccessfulRefresh?.toISOString() || null,
+          lastRefreshAttempt: agentStatusSnapshot.lastRefreshAttempt?.toISOString() || null,
+          totalRefreshCycles: agentStatusSnapshot.totalRefreshCycles,
+          consecutiveFailures: agentStatusSnapshot.consecutiveFailures,
+          awsStationCount: agentStatusSnapshot.awsStationCount,
+          nowcastDistrictCount: agentStatusSnapshot.nowcastDistrictCount,
+          warningDistrictCount: agentStatusSnapshot.warningDistrictCount,
+          refreshIntervalMinutes: 5,
+        },
       });
     }
 
     return NextResponse.json({
       status: 'OK',
       audit,
+      backgroundAgent: {
+        isRunning: agentStatusSnapshot.isRunning,
+        lastSuccessfulRefresh: agentStatusSnapshot.lastSuccessfulRefresh?.toISOString() || null,
+        lastRefreshAttempt: agentStatusSnapshot.lastRefreshAttempt?.toISOString() || null,
+        totalRefreshCycles: agentStatusSnapshot.totalRefreshCycles,
+        consecutiveFailures: agentStatusSnapshot.consecutiveFailures,
+        awsStationCount: agentStatusSnapshot.awsStationCount,
+        nowcastDistrictCount: agentStatusSnapshot.nowcastDistrictCount,
+        warningDistrictCount: agentStatusSnapshot.warningDistrictCount,
+        refreshIntervalMinutes: 5,
+      },
     }, {
       headers: {
         'Cache-Control': 'public, max-age=60, stale-while-revalidate=30',

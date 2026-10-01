@@ -31,34 +31,55 @@ export const ActiveEventBar: React.FC<ActiveEventBarProps> = ({
     return () => clearInterval(id);
   }, []);
 
-  // Filter available danger zones by selected state if a specific state is selected
+  // Filter available danger zones strictly by selected state
   const activeEventsList = React.useMemo(() => {
-    if (!availableEvents || availableEvents.length === 0) {
-      return primaryEvent ? [primaryEvent] : [];
-    }
     if (selectedState && selectedState !== 'All India') {
-      const stateFiltered = availableEvents.filter(
+      return (availableEvents || []).filter(
         (e) => e.state && (
           e.state.toLowerCase().includes(selectedState.toLowerCase()) ||
           selectedState.toLowerCase().includes(e.state.toLowerCase())
         )
       );
-      if (stateFiltered.length > 0) return stateFiltered;
     }
-    return availableEvents;
-  }, [availableEvents, primaryEvent, selectedState]);
+    return availableEvents || [];
+  }, [availableEvents, selectedState]);
 
-  // Determine current displayed event: user clicked event takes precedence, else active index in list
-  const currentEvent = primaryEvent || activeEventsList[activeZoneIndex % Math.max(1, activeEventsList.length)] || null;
+  // Synchronize activeZoneIndex when primaryEvent changes from map or list click
+  useEffect(() => {
+    if (primaryEvent && activeEventsList.length > 0) {
+      const idx = activeEventsList.findIndex(
+        (e) => e.id === primaryEvent.id || (e.district && primaryEvent.district && e.district.toLowerCase() === primaryEvent.district.toLowerCase())
+      );
+      if (idx !== -1) {
+        setActiveZoneIndex(idx);
+      }
+    }
+  }, [primaryEvent, activeEventsList]);
+
+  const currentEvent = activeEventsList.length > 0
+    ? activeEventsList[activeZoneIndex % activeEventsList.length]
+    : primaryEvent;
 
   const handlePrev = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setActiveZoneIndex((prev) => (prev > 0 ? prev - 1 : activeEventsList.length - 1));
+    if (activeEventsList.length === 0) return;
+    const nextIdx = activeZoneIndex > 0 ? activeZoneIndex - 1 : activeEventsList.length - 1;
+    setActiveZoneIndex(nextIdx);
+    const targetEvent = activeEventsList[nextIdx];
+    if (targetEvent) {
+      onInspectEvent(targetEvent);
+    }
   };
 
   const handleNext = (e: React.MouseEvent) => {
     e.stopPropagation();
-    setActiveZoneIndex((prev) => (prev + 1) % Math.max(1, activeEventsList.length));
+    if (activeEventsList.length === 0) return;
+    const nextIdx = (activeZoneIndex + 1) % activeEventsList.length;
+    setActiveZoneIndex(nextIdx);
+    const targetEvent = activeEventsList[nextIdx];
+    if (targetEvent) {
+      onInspectEvent(targetEvent);
+    }
   };
 
   const displayEvent = currentEvent;
@@ -150,9 +171,13 @@ export const ActiveEventBar: React.FC<ActiveEventBarProps> = ({
             >
               <ChevronLeft size={13} />
             </button>
-            <span className="text-amber-400 font-bold px-1 whitespace-nowrap">
+            <button
+              onClick={handleNext}
+              className="text-amber-400 hover:text-amber-300 font-bold px-1 whitespace-nowrap cursor-pointer hover:underline"
+              title="Click to cycle next danger zone"
+            >
               ZONE {(activeZoneIndex % activeEventsList.length) + 1}/{activeEventsList.length}
-            </span>
+            </button>
             <button
               onClick={handleNext}
               className="p-0.5 hover:text-white text-slate-400 hover:bg-slate-800 rounded transition-colors"

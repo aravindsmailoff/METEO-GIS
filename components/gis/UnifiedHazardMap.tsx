@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { 
   Layers, 
   Map as MapIcon, 
@@ -48,6 +48,8 @@ function getRadarStationCode(name: string): string | null {
   return resolveRadarCodeByName(name);
 }
 
+let cachedLeaflet: any = null;
+
 interface UnifiedHazardMapProps {
   incidents: HazardIncident[];
   stormCells: UnifiedStormCell[];
@@ -93,6 +95,7 @@ interface UnifiedHazardMapProps {
   selectedHotspot?: any;
   onSelectHotspot?: (hp: any) => void;
   activeCycloneTrack?: any[];
+  refreshTrigger?: number;
 }
 
 export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
@@ -138,6 +141,7 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
   selectedPluvialZone,
   onSwitchToNasaClouds,
   selectedHotspot,
+  refreshTrigger = 0,
   onSelectHotspot,
   activeCycloneTrack,
 }) => {
@@ -228,6 +232,8 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
     showHailLayer,
     showCloudburstLayer,
     showPluvialFloodLayer,
+    selectedPluvialZone,
+    selectedHotspot,
   });
 
   // Always keep latest operational state synchronously up-to-date on every render
@@ -254,6 +260,8 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
     showHailLayer,
     showCloudburstLayer,
     showPluvialFloodLayer,
+    selectedPluvialZone,
+    selectedHotspot,
   };
 
   useEffect(() => { liveAwsStationsRef.current = liveAwsStations; }, [liveAwsStations]);
@@ -292,87 +300,77 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
     }
   }, [selectedPluvialZone, selectedHotspot]);
 
-  // When selectedHotspot changes, fly map to hotspot coordinates
+  // When selectedHotspot or selectedPluvialZone changes, fly map to target coordinates
   useEffect(() => {
     if (selectedHotspot && mapInstanceRef.current) {
       mapInstanceRef.current.flyTo([selectedHotspot.latitude, selectedHotspot.longitude], 16, { duration: 1.0 });
+    } else if (selectedPluvialZone && selectedPluvialZone.latitude && selectedPluvialZone.longitude && mapInstanceRef.current) {
+      mapInstanceRef.current.flyTo([selectedPluvialZone.latitude, selectedPluvialZone.longitude], 13.5, { duration: 1.2 });
     }
-  }, [selectedHotspot]);
+  }, [selectedHotspot, selectedPluvialZone]);
 
-  // Fetch real data on load and state change
+  // Fetch real data on load, state change, manual refresh, and 5-min auto-refresh interval
   useEffect(() => {
-    const stateParam = selectedState && selectedState !== 'All India' ? `?state=${encodeURIComponent(selectedState)}` : '';
+    let isCancelled = false;
 
-    // 1. Live Rainfall
-    fetch(`/api/live/rainfall${stateParam}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.rainfallPoints) {
-          setLiveRainfallPoints(data.rainfallPoints);
-          liveRainfallPointsRef.current = data.rainfallPoints;
-        }
-      })
-      .catch(() => {});
+    const fetchFreshData = async () => {
+      const stateParam = selectedState && selectedState !== 'All India' ? `state=${encodeURIComponent(selectedState)}` : '';
+      const freshParam = refreshTrigger && refreshTrigger > 0 ? 'fresh=1' : '';
+      const parts = [stateParam, freshParam].filter(Boolean);
+      const qs = parts.length > 0 ? `?${parts.join('&')}` : '';
 
-    // 2. Live AWS Stations
-    fetch(`/api/live/stations${stateParam}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.stations) {
-          setLiveAwsStations(data.stations);
-          liveAwsStationsRef.current = data.stations;
-        }
-      })
-      .catch(() => {});
+      try {
+        const [rainRes, stnRes, nowRes, warnRes, evRes, hazRes] = await Promise.all([
+          fetch(`/api/live/rainfall${qs}`).then((r) => r.json()).catch(() => ({})),
+          fetch(`/api/live/stations${qs}`).then((r) => r.json()).catch(() => ({})),
+          fetch(`/api/live/nowcast${qs}`).then((r) => r.json()).catch(() => ({})),
+          fetch(`/api/live/warnings${qs}`).then((r) => r.json()).catch(() => ({})),
+          fetch(`/api/live/events${qs}`).then((r) => r.json()).catch(() => ({})),
+          fetch(`/api/live/hazards${qs}`).then((r) => r.json()).catch(() => ({})),
+        ]);
 
-    // 3. Live Nowcasts
-    fetch(`/api/live/nowcast${stateParam}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.nowcasts) {
-          setLiveNowcasts(data.nowcasts);
-          liveNowcastsRef.current = data.nowcasts;
-        }
-      })
-      .catch(() => {});
+        if (isCancelled) return;
 
-    // 4. Live Warnings
-    fetch(`/api/live/warnings${stateParam}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.warnings) {
-          setLiveWarnings(data.warnings);
-          liveWarningsRef.current = data.warnings;
+        if (rainRes?.rainfallPoints) {
+          setLiveRainfallPoints(rainRes.rainfallPoints);
+          liveRainfallPointsRef.current = rainRes.rainfallPoints;
         }
-      })
-      .catch(() => {});
+        if (stnRes?.stations) {
+          setLiveAwsStations(stnRes.stations);
+          liveAwsStationsRef.current = stnRes.stations;
+        }
+        if (nowRes?.nowcasts) {
+          setLiveNowcasts(nowRes.nowcasts);
+          liveNowcastsRef.current = nowRes.nowcasts;
+        }
+        if (warnRes?.warnings) {
+          setLiveWarnings(warnRes.warnings);
+          liveWarningsRef.current = warnRes.warnings;
+        }
+        if (evRes?.activeEvents) {
+          setLiveEventsList(evRes.activeEvents);
+          liveEventsListRef.current = evRes.activeEvents;
+        }
+        if (hazRes?.events) {
+          setLiveHazardEvents(hazRes.events);
+          liveHazardEventsRef.current = hazRes.events;
+        }
+        if (hazRes?.pluvialFloodZones) {
+          setLivePluvialFloodZones(hazRes.pluvialFloodZones);
+          livePluvialFloodZonesRef.current = hazRes.pluvialFloodZones;
+        }
+      } catch {}
+    };
 
-    // 5. Live Events
-    fetch(`/api/live/events${stateParam}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.activeEvents) {
-          setLiveEventsList(data.activeEvents);
-          liveEventsListRef.current = data.activeEvents;
-        }
-      })
-      .catch(() => {});
+    fetchFreshData();
 
-    // 6. Live Derived Hydromet Hazards & Pluvial Flood Zones
-    fetch(`/api/live/hazards${stateParam}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.events) {
-          setLiveHazardEvents(data.events);
-          liveHazardEventsRef.current = data.events;
-        }
-        if (data.pluvialFloodZones) {
-          setLivePluvialFloodZones(data.pluvialFloodZones);
-          livePluvialFloodZonesRef.current = data.pluvialFloodZones;
-        }
-      })
-      .catch(() => {});
-  }, [selectedState]);
+    // Auto-refresh all map hazard layers every 5 minutes (300,000 ms)
+    const autoInterval = setInterval(fetchFreshData, 300000);
+    return () => {
+      isCancelled = true;
+      clearInterval(autoInterval);
+    };
+  }, [selectedState, refreshTrigger]);
 
   // Focus effect for State / Region Jump (guarded against infinite render loops)
   useEffect(() => {
@@ -384,11 +382,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
       if (lastFocusKeyRef.current !== focusKey) {
         lastFocusKeyRef.current = focusKey;
         mapInstanceRef.current.flyTo(focusCoords, targetZoom, { duration: 1.2 });
-        if (handleInspectLocationRef.current) {
-          // Use selectedEvidence prop (available in closure) as the explicit event anchor
-          const activeEv = selectedEvidence as any;
-          handleInspectLocationRef.current(focusCoords[0], focusCoords[1], undefined, activeEv || undefined);
-        }
       }
       return;
     }
@@ -433,16 +426,9 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
     let isMounted = true;
 
     const initMap = async () => {
-      const L = (await import('leaflet')).default;
+      const L = cachedLeaflet || (await import('leaflet')).default;
+      cachedLeaflet = L;
       if (!isMounted || !mapContainerRef.current) return;
-
-      if (!document.getElementById('leaflet-css-link')) {
-        const link = document.createElement('link');
-        link.id = 'leaflet-css-link';
-        link.rel = 'stylesheet';
-        link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-        document.head.appendChild(link);
-      }
 
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
@@ -456,6 +442,7 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
         maxZoom: 18,
         zoomControl: false,
         attributionControl: false,
+        preferCanvas: true,
       });
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
@@ -671,20 +658,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
             dashArray: '5, 5',
           });
 
-          poly.bindTooltip(`
-            <div style="font-family:system-ui;font-size:12px;padding:8px 10px;min-width:240px;background:#0c131f;color:#fff;border-radius:6px;border:1.5px solid ${isCrit ? '#ef4444' : '#38bdf8'};box-shadow:0 4px 16px rgba(0,0,0,0.8);">
-              <div style="display:flex;align-items:center;justify-content:space-between;gap:6;margin-bottom:4px;">
-                <strong style="color:${isCrit ? '#ef4444' : '#38bdf8'};font-size:12.5px;">🌊 ${z.name}</strong>
-              </div>
-              <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">${z.state} · <span style="color:${isCrit ? '#ef4444' : '#f59e0b'};font-weight:700;">${z.risk} FLOOD HAZARD</span></div>
-              <div style="font-size:10.5px;color:#cbd5e1;line-height:1.4;">${z.desc}</div>
-              <div style="margin-top:6px;border-top:1px solid #1e293b;padding-top:4px;font-size:10px;display:flex;justify-content:space-between;color:#38bdf8;">
-                <span>Depth: <strong>${z.depth}</strong></span>
-                <span>Exposed: <strong>${z.pop}</strong></span>
-              </div>
-            </div>
-          `, { sticky: true });
-
           poly.addTo(group);
         });
 
@@ -703,7 +676,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
 
         RIVERS.forEach(r => {
           const line = L.polyline(r.coords as any, { color: '#0284c7', weight: 3.5, opacity: 0.85 });
-          line.bindTooltip(`💧 ${r.name}`, { sticky: true });
           line.addTo(group);
         });
 
@@ -748,7 +720,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
         ];
         RIVERS.forEach(r => {
           const line = L.polyline(r.coords as any, { color: '#0ea5e9', weight: 3.5, opacity: 0.9 });
-          line.bindTooltip(`💧 ${r.name}`, { sticky: true });
           line.addTo(group);
         });
         return group;
@@ -1184,17 +1155,8 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
           });
           const m = L.marker([cLat, cLng], { icon: pingIcon });
           m.bindTooltip(`
-            <div style="font-family: system-ui, sans-serif; font-size: 12px; padding: 7px 10px; background: rgba(12, 19, 31, 0.96); color: #fff; border-radius: 8px; border: 1.5px solid #00f0ff; min-width: 250px; box-shadow: 0 4px 20px rgba(0,0,0,0.85); backdrop-filter: blur(8px);">
-              <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px;">
-                <strong style="color: #00f0ff; font-size: 13px;">📍 ${locationTitle}</strong>
-                <span style="background: #00f0ff; color: #000; font-size: 8px; font-weight: 900; padding: 1px 5px; border-radius: 3px;">INSPECTED</span>
-              </div>
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; font-size: 11px; border-top: 1px solid #1f2b3c; padding-top: 5px;">
-                <span>⛰️ Elev: <strong style="color: #38bdf8;">${calculatedElev}m</strong></span>
-                <span>📐 Slope: <strong style="color: #facc15;">${calculatedSlope}°</strong></span>
-                <span>🌧️ Rain: <strong style="color: #fff;">${rain1h ?? 0} mm</strong></span>
-                <span>🛣️ Road: <strong style="color: ${roadState === 'Blocked' ? '#ef4444' : '#22c55e'};">${roadState}</strong></span>
-              </div>
+            <div style="font-family: system-ui, -apple-system, sans-serif; font-size: 12px; font-weight: 700; padding: 4px 10px; background: rgba(12, 19, 31, 0.95); color: #00f0ff; border-radius: 6px; border: 1.5px solid #00f0ff; box-shadow: 0 4px 16px rgba(0,0,0,0.85); backdrop-filter: blur(8px); white-space: nowrap; pointer-events: none;">
+              📍 ${locationTitle}
             </div>
           `, { permanent: true, direction: 'top', offset: [0, -16] });
           m.addTo(layerGroupsRef.current.inspectedPing);
@@ -1326,15 +1288,31 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
     };
   }, []);
 
+  const renderRafRef = useRef<number | null>(null);
+
+  const scheduleLayerRender = useCallback(() => {
+    if (!mapInstanceRef.current) return;
+    if (renderRafRef.current) {
+      cancelAnimationFrame(renderRafRef.current);
+    }
+    renderRafRef.current = requestAnimationFrame(() => {
+      if (!mapInstanceRef.current) return;
+      const L = cachedLeaflet;
+      if (L) {
+        renderAllOperationalLayers(L, mapInstanceRef.current);
+      } else {
+        import('leaflet').then((mod) => {
+          cachedLeaflet = mod.default;
+          renderAllOperationalLayers(mod.default, mapInstanceRef.current);
+        });
+      }
+    });
+  }, []);
+
   // Synchronous runner ref updater - ensures latest state is invoked by zoomend and resize events
   useEffect(() => {
-    renderLayersRunnerRef.current = () => {
-      if (!mapInstanceRef.current) return;
-      import('leaflet').then((L) => {
-        renderAllOperationalLayers(L.default, mapInstanceRef.current);
-      });
-    };
-  });
+    renderLayersRunnerRef.current = scheduleLayerRender;
+  }, [scheduleLayerRender]);
 
   // Update Basemap
   useEffect(() => {
@@ -1354,13 +1332,11 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
     }
   }, [baseMap]);
 
-  // Re-render when real data or layer toggles change
+  // Re-render when real data or layer toggles change (debounced via requestAnimationFrame)
   useEffect(() => {
-    if (!mapInstanceRef.current) return;
-    import('leaflet').then((L) => {
-      renderAllOperationalLayers(L.default, mapInstanceRef.current);
-    });
+    scheduleLayerRender();
   }, [
+    scheduleLayerRender,
     liveRainfallPoints,
     liveAwsStations,
     liveNowcasts,
@@ -1383,6 +1359,8 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
     showHailLayer,
     showCloudburstLayer,
     showPluvialFloodLayer,
+    selectedPluvialZone,
+    selectedHotspot,
   ]);
 
   const renderAllOperationalLayers = (L: any, map: any) => {
@@ -1413,6 +1391,8 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
       showHailLayer: sHail,
       showCloudburstLayer: sCloud,
       showPluvialFloodLayer: sPluvial,
+      selectedPluvialZone: selZone,
+      selectedHotspot: selHp,
     } = operationalStateRef.current;
 
     Object.keys(lg).forEach((k) => {
@@ -1454,17 +1434,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
           fillOpacity: currentZoom < 6.5 ? 0.75 : 0.85,
         });
 
-        rainMarker.bindTooltip(`
-          <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 4px; color: #fff;">
-            <strong style="color: ${color};">${p.stationName}</strong><br/>
-            <span>District: <strong>${p.district} (${p.state})</strong></span><br/>
-            <span>Observed 24h Rain: <strong>${p.rainfall24hMm} mm</strong></span><br/>
-            <span>1h Rate: <strong>${p.rainfall1hMm} mm/h</strong></span><br/>
-            <span style="color: #38bdf8;">IMD Category: ${p.category.replace('_', ' ')}</span><br/>
-            <span style="color: #94a3b8; font-size: 9px;">${p.observationTimestampIST} · Ground Truth</span>
-          </div>
-        `, { sticky: true });
-
         rainMarker.on('click', () => {
           if (handleInspectLocationRef.current) {
             handleInspectLocationRef.current(p.latitude, p.longitude, undefined, undefined, p);
@@ -1504,15 +1473,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
         });
 
         const stMarker = L.marker([st.latitude, st.longitude], { icon: stIcon });
-        stMarker.bindTooltip(`
-          <div style="font-family: system-ui, sans-serif; font-size: 10.5px; padding: 4px; color: #fff; background: #0c131f; border-radius: 6px; border: 1px solid #1f2b3c;">
-            <strong style="color: ${pinColor};">${st.stationName}</strong> (${st.id})<br/>
-            <span>District: <strong>${st.district} (${st.state})</strong></span><br/>
-            <span>Temp: <strong>${st.temperatureC !== null ? st.temperatureC + '°C' : 'Offline'}</strong> · RH: <strong>${st.humidityPercent !== null ? st.humidityPercent + '%' : 'N/A'}</strong></span><br/>
-            <span>Wind: <strong>${st.windSpeedKmh !== null ? st.windSpeedKmh + ' km/h' : 'N/A'}</strong> · Rain 24h: <strong>${st.rainfall24hMm !== null ? st.rainfall24hMm + ' mm' : '0 mm'}</strong></span><br/>
-            <span style="color: ${pinColor}; font-size: 9px; font-weight: bold;">● ${statusBadge} (${age}m age) · Click to inspect</span>
-          </div>
-        `, { sticky: true });
 
         stMarker.on('click', () => {
           if (handleInspectLocationRef.current) {
@@ -1608,24 +1568,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
           fillOpacity: w.currentAlertLevel === 'RED' ? 0.35 : w.currentAlertLevel === 'ORANGE' ? 0.26 : 0.18,
         });
 
-        const now = Date.now();
-        const cdSec = Math.max(0, Math.floor((now + 2 * 3600 * 1000 + 45 * 60 * 1000 - now) / 1000));
-        const cdStr = `${Math.floor(cdSec / 3600)}h ${String(Math.floor((cdSec % 3600) / 60)).padStart(2, '0')}m remaining`;
-
-        poly.bindTooltip(`
-          <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 6px; color: #fff; background: #0c131f; border-radius: 6px; border: 1.5px solid ${alertColor}; min-width: 200px; box-shadow: 0 4px 16px rgba(0,0,0,0.8);">
-            <strong style="color: ${alertColor}; font-size: 12px;">IMD OFFICIAL ${alertLabel}: ${w.district}</strong><br/>
-            <span>State: <strong>${w.state || 'India'}</strong></span><br/>
-            <span>Hazard: <strong>${w.currentWarning || w.day1Warning}</strong></span><br/>
-            <div style="margin-top: 4px; padding: 3px 6px; background: rgba(245,158,11,0.18); border: 1px solid rgba(245,158,11,0.4); border-radius: 4px;">
-              <span style="color: #f59e0b; font-weight: 800; font-size: 9.5px;">⏱️ WARNING COUNTDOWN: </span>
-              <span style="color: #fff; font-family: monospace; font-weight: bold; font-size: 11px;">${cdStr}</span>
-            </div>
-            <div style="margin-top: 3px; font-size: 9px; color: #94a3b8;">Updated: ${w.updatedAtIST} · Bulletin Active</div>
-            <span style="color: #38bdf8; font-size: 9px; font-weight: bold; display: block; margin-top: 3px;">● Click to inspect district telemetry</span>
-          </div>
-        `, { sticky: true });
-
         poly.on('click', () => {
           if (handleInspectLocationRef.current) {
             handleInspectLocationRef.current(w.latitude, w.longitude, undefined, {
@@ -1655,9 +1597,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
         if (n.severityColor === 'GREEN') return;
 
         const color = n.severityColor === 'RED' ? '#ef4444' : n.severityColor === 'ORANGE' ? '#f97316' : '#eab308';
-        const now = Date.now();
-        const cdSec = Math.max(0, Math.floor((now + 1 * 3600 * 1000 + 35 * 60 * 1000 - now) / 1000));
-        const cdStr = `${Math.floor(cdSec / 3600)}h ${String(Math.floor((cdSec % 3600) / 60)).padStart(2, '0')}m remaining`;
 
         const circle = L.circle([stn.latitude, stn.longitude], {
           radius: 18000,
@@ -1667,19 +1606,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
           fillColor: color,
           fillOpacity: 0.12,
         });
-
-        circle.bindTooltip(`
-          <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 6px; color: #fff; background: #0c131f; border-radius: 6px; border: 1.5px solid ${color}; min-width: 210px; box-shadow: 0 4px 16px rgba(0,0,0,0.8);">
-            <strong style="color: ${color}; font-size: 12px;">IMD NOWCAST: ${n.district}</strong><br/>
-            <span>Hazards: <strong>${(n.hazards || []).join(', ') || n.message}</strong></span><br/>
-            <div style="margin-top: 4px; padding: 3px 6px; background: rgba(56,189,248,0.18); border: 1px solid rgba(56,189,248,0.4); border-radius: 4px;">
-              <span style="color: #38bdf8; font-weight: 800; font-size: 9.5px;">⏱️ STORM TIMER: </span>
-              <span style="color: #fff; font-family: monospace; font-weight: bold; font-size: 11px;">${cdStr}</span>
-              <div style="font-size: 9px; color: #94a3b8; margin-top: 1px;">Valid until: ${n.validUptoIST} IST</div>
-            </div>
-            <span style="color: #94a3b8; font-size: 9px; display: block; margin-top: 3px;">Issued: ${n.timeOfIssueIST} IST · Doppler Integrated</span>
-          </div>
-        `, { sticky: true });
 
         circle.on('click', () => {
           if (handleInspectLocationRef.current) {
@@ -1711,15 +1637,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
           fillColor: color,
           fillOpacity: 0.9,
         });
-
-        evMarker.bindTooltip(`
-          <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 4px; color: #fff; background: #0c131f; border-radius: 6px; border: 1px solid ${color};">
-            <strong style="color: ${color};">${ev.headline}</strong><br/>
-            <span>Location: <strong>${ev.location}</strong></span><br/>
-            <span>Evidence: ${ev.evidence}</span><br/>
-            <span style="color: #94a3b8; font-size: 9px;">${ev.sourceTimestamp} · ${ev.source.split('(')[0]}</span>
-          </div>
-        `, { sticky: true });
 
         evMarker.on('click', () => {
           if (handleInspectLocationRef.current) {
@@ -1754,13 +1671,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
           dashArray: '6, 6',
         }).addTo(lg.cycloneTrack);
 
-        cycloneLine.bindTooltip(`
-          <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 5px 8px; background: #0c131f; color: #fff; border-radius: 6px; border: 1.5px solid #ef4444; box-shadow: 0 4px 16px rgba(0,0,0,0.8);">
-            <strong style="color: #ef4444; font-size: 12px;">🌀 Active Cyclone Track</strong><br/>
-            <span style="color: #94a3b8; font-size: 10px;">Official RSMC Tropical Cyclones Division Bulletin</span>
-          </div>
-        `, { sticky: true });
-
         realTrackPoints.forEach((pt: any) => {
           const dIcon = L.divIcon({
             className: 'cyclone-d-icon',
@@ -1774,14 +1684,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
           });
 
           const marker = L.marker([pt.lat, pt.lng], { icon: dIcon })
-            .bindTooltip(`
-              <div style="font-family: system-ui, sans-serif; font-size: 10px; padding: 2px;">
-                <strong style="color: #ef4444;">${pt.label || 'Cyclone Track Point'}</strong><br/>
-                <span>Synoptic Track Point: <strong>${pt.date || ''}</strong></span><br/>
-                <span>Source: IMD RSMC Tropical Cyclones Division</span><br/>
-                <span style="color: #38bdf8; font-weight: 700;">Click to inspect Landfall Forecast & Surge Countdown</span>
-              </div>
-            `, { sticky: true })
             .addTo(lg.cycloneTrack!);
 
           marker.on('click', () => {
@@ -1867,29 +1769,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
             });
 
         const m = L.marker([inc.lat, inc.lng], { icon: slopeIcon });
-        m.bindTooltip(`
-          <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 6px; color: #fff; background: #0c131f; border-radius: 8px; border: 1px solid ${pinColor}; min-width: 250px; box-shadow: 0 4px 16px rgba(0,0,0,0.6);">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <strong style="color: ${pinColor}; font-size: 12px;">${inc.name}</strong>
-              <span style="background: ${badgeBg}; color: ${badgeTextColor}; font-size: 8px; font-weight: 800; padding: 1px 4px; border-radius: 3px;">${statusBadge}</span>
-            </div>
-            <div style="color: #94a3b8; font-size: 9.5px; margin-bottom: 4px;">
-              ${inc.district} (${inc.state}) • ${inc.type}
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding-top: 4px; border-top: 1px solid #1f2b3c; font-size: 10px;">
-              <span>DEM Slope: <strong style="color: #facc15;">${inc.slopeDeg}°</strong></span>
-              <span>Elevation: <strong style="color: #38bdf8;">${inc.copernicusGlo30Elev || 850}m</strong></span>
-              <span>InSAR Creep: <strong style="color: #fb7185;">${inc.insarDeformationMmYr || -4.2} mm/yr</strong></span>
-              <span>24h Rain: <strong style="color: #38bdf8;">${inc.rainfall24h} mm</strong></span>
-            </div>
-            <div style="margin-top: 4px; padding-top: 3px; border-top: 1px solid #1f2b3c; font-size: 9px; color: #cbd5e1;">
-              Road Corridor: <strong style="color: #fff;">${inc.roadName}</strong>
-            </div>
-            <div style="margin-top: 4px; font-size: 8.5px; color: #38bdf8; font-weight: bold;">
-              ● Click marker to load into Explainable AI & Geotech models
-            </div>
-          </div>
-        `, { sticky: true });
 
         m.on('click', () => {
           if (onSelectIncident) onSelectIncident(inc);
@@ -1994,21 +1873,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
               });
 
           const m = L.marker([h.latitude, h.longitude], { icon: tsIcon });
-          m.bindTooltip(`
-            <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 6px 8px; background: #0c131f; color: #fff; border-radius: 8px; border: 1.5px solid ${pinColor}; min-width: 250px; box-shadow: 0 4px 16px rgba(0,0,0,0.7);">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <strong style="color: ${pinColor}; font-size: 12px;">${tooltipHeader}</strong>
-                <span style="background: ${isRed ? '#ef4444' : isOrange ? '#f97316' : '#f59e0b'}; color: ${isRed ? '#fff' : '#000'}; font-size: 8px; font-weight: 900; padding: 1px 4px; border-radius: 3px;">${h.severity}</span>
-              </div>
-              <div style="color: #94a3b8; font-size: 9.5px; margin-bottom: 4px;">
-                ${h.state} • ${h.categoryLabels?.join(' · ') || 'Active Synoptic Weather Bulletin'}
-              </div>
-              <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #1f2b3c; font-size: 9.5px; display: flex; justify-content: space-between;">
-                <span style="color: #38bdf8; font-family: monospace; font-weight: bold;">⏳ ${formatCountdown(h.validUntilEpoch, h.category)}</span>
-                <span style="color: #cbd5e1;">Valid to ${h.validUntilIST}</span>
-              </div>
-            </div>
-          `, { sticky: true });
 
           m.on('click', () => {
             if (onSelectHazardEvent) onSelectHazardEvent(h);
@@ -2055,21 +1919,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
               });
 
           const m = L.marker([h.latitude, h.longitude], { icon: hailIcon });
-          m.bindTooltip(`
-            <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 6px 8px; background: #0c131f; color: #fff; border-radius: 8px; border: 1.5px solid #06b6d4; min-width: 260px; box-shadow: 0 4px 16px rgba(0,0,0,0.7);">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <strong style="color: #06b6d4; font-size: 12px;">🧊 HAILSTORM: ${h.district}</strong>
-                <span style="background: #06b6d4; color: #000; font-size: 8px; font-weight: 900; padding: 1px 4px; border-radius: 3px;">CAT 17 (DUAL)</span>
-              </div>
-              <div style="color: #cbd5e1; font-size: 10px; margin-bottom: 4px;">
-                ⚡ Thunderstorm WITH Hail (Single Dual-Labeled Bulletin)
-              </div>
-              <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #1f2b3c; font-size: 9.5px; display: flex; justify-content: space-between;">
-                <span style="color: #38bdf8; font-family: monospace; font-weight: bold;">⏳ ${formatCountdown(h.validUntilEpoch)}</span>
-                <span style="color: #94a3b8;">Valid to ${h.validUntilIST}</span>
-              </div>
-            </div>
-          `, { sticky: true });
 
           m.on('click', () => {
             if (onSelectHazardEvent) onSelectHazardEvent(h);
@@ -2130,22 +1979,6 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
               });
 
           const m = L.marker([h.latitude, h.longitude], { icon: cbIcon });
-          m.bindTooltip(`
-            <div style="font-family: system-ui, sans-serif; font-size: 11px; padding: 6px 8px; background: #0c131f; color: #fff; border-radius: 8px; border: 1.5px solid ${ringColor}; min-width: 270px; box-shadow: 0 4px 18px rgba(0,0,0,0.8);">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <strong style="color: ${ringColor}; font-size: 12px;">🌊 CLOUDBURST: ${h.district}</strong>
-                <span style="background: ${isConfirmed ? '#ef4444' : '#f43f5e'}; color: #fff; font-size: 8px; font-weight: 900; padding: 1px 4px; border-radius: 3px;">${h.cloudburstStatus}</span>
-              </div>
-              <div style="color: #cbd5e1; font-size: 10px;">
-                Triggering Station: <strong>${h.triggeringStation}</strong><br/>
-                Hourly Precipitation Rate: <strong style="color: #38bdf8;">${h.rainfallRateMmH} mm/h</strong>
-              </div>
-              <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid #1f2b3c; font-size: 9.5px; display: flex; justify-content: space-between;">
-                <span style="color: #38bdf8; font-family: monospace; font-weight: bold;">⏳ ${formatCountdown(h.validUntilEpoch)}</span>
-                <span style="color: #94a3b8;">Window: 60-min Rolling</span>
-              </div>
-            </div>
-          `, { sticky: true });
 
           m.on('click', () => {
             if (onSelectHazardEvent) onSelectHazardEvent(h);
@@ -2177,24 +2010,28 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
           });
 
           const m = L.marker([h.latitude, h.longitude], { icon: bgIcon });
-          m.bindTooltip(`
-            <div style="font-family: system-ui, sans-serif; font-size: 10.5px; padding: 4px 6px; background: #0c131f; color: #fff; border-radius: 6px; border: 1px solid #30363d;">
-              <strong style="color: ${isDrizzle ? '#67e8f9' : '#cbd5e1'};">${isDrizzle ? '🌦️ DRIZZLE (<5 mm/h)' : '🌧️ ROUTINE PRECIPITATION'}</strong><br/>
-              <span>District: <strong>${h.district} (${h.state})</strong></span><br/>
-              <span style="color: #94a3b8; font-size: 9px;">${(h.categoryLabels || []).join(' · ')}</span>
-            </div>
-          `, { sticky: true });
 
           m.addTo(lg.hazardBackground);
         });
     }
 
     // 12. LOW-LYING & PLUVIAL FLOOD-PRONE AREAS (Part 5 — DEM Minima + Live Rainfall)
-    if ((sPluvial || sBasins) && lg.pluvialFloodZones && floodZonesList && floodZonesList.length > 0) {
-      floodZonesList.forEach((zone: any) => {
+    const activeSelZone = selZone || selectedPluvialZone;
+    const allFloodZones = [...(floodZonesList || [])];
+    if (activeSelZone && activeSelZone.latitude && activeSelZone.longitude) {
+      const exists = allFloodZones.some(z => z.id === activeSelZone.id || (Math.abs(z.latitude - activeSelZone.latitude) < 0.001 && Math.abs(z.longitude - activeSelZone.longitude) < 0.001));
+      if (!exists) {
+        allFloodZones.push(activeSelZone);
+      }
+    }
+
+    if ((sPluvial || sBasins) && lg.pluvialFloodZones && allFloodZones.length > 0) {
+      allFloodZones.forEach((zone: any) => {
         const isCrit = zone.pluvialFloodRisk === 'CRITICAL';
         const isHigh = zone.pluvialFloodRisk === 'HIGH';
-        const floodColor = isCrit ? '#ef4444' : isHigh ? '#f59e0b' : '#38bdf8';
+        const isMod = zone.pluvialFloodRisk === 'MODERATE';
+        const floodColor = isCrit ? '#ef4444' : isHigh ? '#f59e0b' : isMod ? '#06b6d4' : '#38bdf8';
+        const isSelectedZone = activeSelZone && (activeSelZone.id === zone.id || (Math.abs(activeSelZone.latitude - zone.latitude) < 0.001 && Math.abs(activeSelZone.longitude - zone.longitude) < 0.001));
 
         // Zone label is derived from the API-assigned category, never from a geographic bbox
         const zoneHazardType = (zone.cityHotspots?.[0]?.category === 'CYCLONE_PRONE_AREA')
@@ -2204,21 +2041,44 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
           : '🌊 Low-Lying Inundation Risk Area';
 
         L.circle([zone.latitude, zone.longitude], {
-          radius: 5000,
-          color: floodColor,
-          weight: 1.5,
-          dashArray: '4, 4',
-          fillColor: floodColor,
-          fillOpacity: isCrit ? 0.28 : isHigh ? 0.20 : 0.12,
+          radius: isSelectedZone ? 4500 : 3500,
+          color: isSelectedZone ? '#38bdf8' : floodColor,
+          weight: isSelectedZone ? 3.0 : 1.5,
+          dashArray: isSelectedZone ? undefined : '4, 4',
+          fillColor: isSelectedZone ? '#38bdf8' : floodColor,
+          fillOpacity: isSelectedZone ? 0.38 : (isCrit ? 0.28 : isHigh ? 0.20 : 0.12),
         })
         .on('click', () => {
           if (onSelectPluvialZone) onSelectPluvialZone(zone);
-          if (handleInspectLocationRef.current) handleInspectLocationRef.current(zone.latitude, zone.longitude);
           if (mapInstanceRef.current) {
             mapInstanceRef.current.flyTo([zone.latitude, zone.longitude], 14, { duration: 1.2 });
           }
         })
         .addTo(lg.pluvialFloodZones);
+
+        // If zone has no pinpoints or is selected, render direct low-lying basin badge
+        if ((!zone.cityHotspots || zone.cityHotspots.length === 0) || isSelectedZone) {
+          const basinIcon = L.divIcon({
+            className: 'custom-basin-marker',
+            html: `
+              <div style="display: flex; align-items: center; gap: 6px; background: rgba(12, 19, 31, 0.94); border: 1.5px solid ${floodColor}; border-radius: 12px; padding: 3px 8px 3px 6px; box-shadow: 0 4px 14px rgba(0,0,0,0.85); cursor: pointer; white-space: nowrap;">
+                <div style="width: 18px; height: 18px; border-radius: 50%; background: ${floodColor}22; border: 1px solid ${floodColor}; display: flex; align-items: center; justify-content: center; font-size: 10px;">🌊</div>
+                <div style="display: flex; flex-direction: column;">
+                  <span style="font-size: 10px; font-weight: 700; color: #fff;">${zone.zoneName || 'Low-Lying Sump Basin'}</span>
+                  <span style="font-size: 8.5px; color: ${floodColor}; font-weight: 800;">${zone.pluvialFloodRisk || 'MODERATE'} RISK · ${zone.liveRainRateMmH || 0} mm/h</span>
+                </div>
+              </div>
+            `,
+            iconSize: [220, 28],
+            iconAnchor: [12, 14],
+          });
+
+          L.marker([zone.latitude, zone.longitude], { icon: basinIcon })
+            .on('click', () => {
+              if (onSelectPluvialZone) onSelectPluvialZone(zone);
+            })
+            .addTo(lg.pluvialFloodZones);
+        }
 
         // Render micro street-level pinpoints when zoomed in OR when this zone is currently selected
         const currZoom = map ? map.getZoom() : (mapInstanceRef.current ? mapInstanceRef.current.getZoom() : 5);
@@ -2323,8 +2183,39 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
 
   const currentMapInfo = METEOROLOGICAL_MAPS.find(m => m.id === baseMap) || METEOROLOGICAL_MAPS[0];
 
-  // Primary active hazard for on-map HUD
-  const primaryHudEvent = liveHazardEvents.find((h: any) => h.isSevere) || liveHazardEvents[0] || null;
+  // Primary active hazard for on-map HUD: strictly scoped to selected state & active focus (Zero cross-state bleed)
+  const primaryHudEvent = React.useMemo(() => {
+    // 1. If an event is currently selected or focused by user matching state, prioritize it:
+    if (selectedEvidence?.district) {
+      const matched = liveHazardEvents.find((h: any) =>
+        h.district?.toLowerCase() === selectedEvidence.district?.toLowerCase() ||
+        selectedEvidence.district?.toLowerCase().includes(h.district?.toLowerCase())
+      );
+      if (matched && (!selectedState || selectedState === 'All India' || (matched.state && matched.state.toLowerCase().includes(selectedState.toLowerCase())))) {
+        return matched;
+      }
+    }
+
+    // 2. Filter available hazard events strictly by selectedState if not 'All India':
+    const stateEvents = (selectedState && selectedState !== 'All India')
+      ? liveHazardEvents.filter((h: any) => h.state && (
+          h.state.toLowerCase().includes(selectedState.toLowerCase()) ||
+          selectedState.toLowerCase().includes(h.state.toLowerCase())
+        ))
+      : liveHazardEvents;
+
+    // 3. Return severe event in selected territory:
+    const severeInTerritory = stateEvents.find((h: any) => h.isSevere);
+    if (severeInTerritory) return severeInTerritory;
+
+    // 4. Return first event in selected territory if any:
+    if (stateEvents.length > 0) return stateEvents[0];
+
+    // 5. If state has zero active alerts (e.g. calm state), return null (never fall back to Chittoor or other states):
+    if (selectedState && selectedState !== 'All India') return null;
+
+    return liveHazardEvents.find((h: any) => h.isSevere) || liveHazardEvents[0] || null;
+  }, [liveHazardEvents, selectedState, selectedEvidence]);
   const hudCd = getHazardCountdownDetails(primaryHudEvent, hudClockMs);
   const hudBorderColor = hudCd.colorScheme === 'purple' ? 'rgba(168, 85, 247, 0.85)' : hudCd.colorScheme === 'red' ? 'rgba(239, 68, 68, 0.85)' : 'rgba(245, 158, 11, 0.85)';
   const hudShadowColor = hudCd.colorScheme === 'purple' ? 'rgba(168,85,247,0.3)' : hudCd.colorScheme === 'red' ? 'rgba(239,68,68,0.3)' : 'rgba(245,158,11,0.3)';

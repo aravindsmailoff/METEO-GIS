@@ -6,6 +6,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // instrumentation.ts is supported by default in Next.js 15+ without any config flag
 }
 
 export default nextConfig

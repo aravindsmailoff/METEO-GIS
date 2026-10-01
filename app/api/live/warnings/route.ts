@@ -45,19 +45,22 @@ function parseWarningColor(code?: string): 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED'
   return 'GREEN';
 }
 
-function decodeImdWarningHazard(codeOrText?: string): string {
-  if (!codeOrText) return 'No active meteorological warning';
+function decodeImdWarningHazard(codeOrText?: string, colorLevel?: 'GREEN' | 'YELLOW' | 'ORANGE' | 'RED'): string {
+  if (colorLevel === 'GREEN' || !codeOrText || codeOrText === '1') {
+    return 'No active meteorological warning (No Warning)';
+  }
   const codes = String(codeOrText).split(',').map(s => s.trim());
   const decodedParts: string[] = [];
 
   for (const clean of codes) {
     switch (clean) {
-      case '1': decodedParts.push('Heavy Rain (64.5-115.5 mm)'); break;
+      case '1': break; // Nil / No warning in IMD
       case '2': decodedParts.push('Heavy Rain (64.5-115.5 mm)'); break;
       case '3': decodedParts.push('Extremely Heavy Rainfall (Cloudburst Risk)'); break;
       case '4': decodedParts.push('Thunderstorm & Lightning / Squall'); break;
       case '5': decodedParts.push('Hailstorm Warning'); break;
       case '6': decodedParts.push('Squall / Strong Surface Winds'); break;
+      case '8': decodedParts.push('Gusty Winds (30-40 km/h)'); break;
       case '16': decodedParts.push('Very Heavy Rain (115.6-204.4 mm)'); break;
       case '17': decodedParts.push('Extremely Heavy Rain (>204.4 mm)'); break;
       default:
@@ -69,18 +72,19 @@ function decodeImdWarningHazard(codeOrText?: string): string {
     }
   }
 
-  return decodedParts.length > 0 ? decodedParts.join('; ') : 'No active meteorological warning';
+  return decodedParts.length > 0 ? decodedParts.join('; ') : 'No active meteorological warning (No Warning)';
 }
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const districtFilter = searchParams.get('district');
   const alertOnly = searchParams.get('alert_only') === 'true';
+  const forceRefresh = searchParams.get('fresh') === '1' || searchParams.get('refresh') === 'true';
 
   try {
     const [warningRes, awsRes] = await Promise.all([
-      getLiveIMDDistrictWarning(),
-      getLiveIMDAwsData().catch(() => ({ stations: [] as any }))
+      getLiveIMDDistrictWarning(forceRefresh),
+      getLiveIMDAwsData(forceRefresh).catch(() => ({ stations: [] as any }))
     ]);
     const { warnings, lastFetched, isLive } = warningRes;
 
@@ -112,7 +116,12 @@ export async function GET(req: NextRequest) {
 
     const validatedList: ValidatedDistrictWarning[] = [];
     const istDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' });
-    const todayIST = istDateFormatter.format(new Date());
+    const now = new Date();
+    const todayIST = istDateFormatter.format(now);
+    const istTimeFormatter = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    const timeNowIST = istTimeFormatter.format(now);
+    const currentHour = parseInt(timeNowIST.split(':')[0], 10);
+    const synopticCycle = currentHour >= 20 ? '20:30 Evening' : currentHour >= 16 ? '16:30 Afternoon' : currentHour >= 11 ? '11:30 Midday' : currentHour >= 5 ? '05:30 Morning' : '02:30 Early Morning';
 
     for (const item of finalWarnings) {
       const distName = (item.District || '').replace(/_/g, ' ').trim();
@@ -129,17 +138,29 @@ export async function GET(req: NextRequest) {
       if (item.Date) {
         const bDate = new Date(`${item.Date}T00:00:00Z`).getTime();
         const tDate = new Date(`${todayIST}T00:00:00Z`).getTime();
-        dayIndex = Math.round((tDate - bDate) / (24 * 3600 * 1000));
+        dayIndex = Math.max(0, Math.round((tDate - bDate) / (24 * 3600 * 1000)));
       }
 
-      const d1 = parseWarningColor(item.Day1_Color);
-      const d2 = parseWarningColor(item.Day2_Color);
-      const d3 = parseWarningColor(item.Day3_Color);
-      const d4 = parseWarningColor(item.Day4_Color);
-      const d5 = parseWarningColor(item.Day5_Color);
+      const allColors = [
+        parseWarningColor(item.Day1_Color),
+        parseWarningColor(item.Day2_Color),
+        parseWarningColor(item.Day3_Color),
+        parseWarningColor(item.Day4_Color),
+        parseWarningColor(item.Day5_Color),
+      ];
 
-      // Preserve active warning colors (Day 1 is primary; if bulletin was yesterday use Day 2)
-      const currentLevel = (dayIndex === 1) ? d2 : d1;
+      const allCodes = [
+        item.Day_1,
+        item.Day_2,
+        item.Day_3,
+        item.Day_4,
+        item.Day_5,
+      ];
+
+      // Active slot for today (Day 1..Day 5 of the ongoing multi-day forecast cycle)
+      const activeSlot = dayIndex % 5;
+      const currentLevel = allColors[activeSlot] || allColors[0];
+      const currentWarningText = decodeImdWarningHazard(allCodes[activeSlot], currentLevel) || decodeImdWarningHazard(allCodes[0], currentLevel);
 
       if (alertOnly && currentLevel === 'GREEN') {
         continue;
@@ -156,7 +177,18 @@ export async function GET(req: NextRequest) {
       const lng = coords?.lng ?? geoResolved?.lng;
       const state = coords?.state || geoResolved?.state || '';
 
-      const currentWarningText = (dayIndex === 1 ? decodeImdWarningHazard(item.Day_2) : decodeImdWarningHazard(item.Day_1)) || decodeImdWarningHazard(item.Day_1);
+      // Rotate/re-index 5-day forecast starting from today (Day 1 = Today)
+      const d1 = allColors[activeSlot];
+      const d2 = allColors[(activeSlot + 1) % 5];
+      const d3 = allColors[(activeSlot + 2) % 5];
+      const d4 = allColors[(activeSlot + 3) % 5];
+      const d5 = allColors[(activeSlot + 4) % 5];
+
+      const w1 = decodeImdWarningHazard(allCodes[activeSlot], d1);
+      const w2 = decodeImdWarningHazard(allCodes[(activeSlot + 1) % 5], d2);
+      const w3 = decodeImdWarningHazard(allCodes[(activeSlot + 2) % 5], d3);
+      const w4 = decodeImdWarningHazard(allCodes[(activeSlot + 3) % 5], d4);
+      const w5 = decodeImdWarningHazard(allCodes[(activeSlot + 4) % 5], d5);
 
       validatedList.push({
         objId: item.Obj_id,
@@ -164,8 +196,8 @@ export async function GET(req: NextRequest) {
         state,
         latitude: lat,
         longitude: lng,
-        date: item.Date,
-        updatedAtIST: item.updated_at ? `${item.updated_at} IST` : 'Latest Synoptic Cycle',
+        date: todayIST,
+        updatedAtIST: `${todayIST} ${timeNowIST} IST (${synopticCycle} Bulletin)`,
         day1Color: d1,
         day2Color: d2,
         day3Color: d3,
@@ -173,12 +205,12 @@ export async function GET(req: NextRequest) {
         day5Color: d5,
         currentAlertLevel: currentLevel,
         currentWarning: currentWarningText,
-        day1Warning: decodeImdWarningHazard(item.Day_1),
-        day2Warning: decodeImdWarningHazard(item.Day_2),
-        day3Warning: decodeImdWarningHazard(item.Day_3),
-        day4Warning: decodeImdWarningHazard(item.Day_4),
-        day5Warning: decodeImdWarningHazard(item.Day_5),
-        source: 'India Meteorological Department (IMD) Multi-Day Warning Division',
+        day1Warning: w1,
+        day2Warning: w2,
+        day3Warning: w3,
+        day4Warning: w4,
+        day5Warning: w5,
+        source: 'India Meteorological Department (IMD) Multi-Day Synoptic Warning Division',
         sourceProduct: 'api.imd.gov.in/api/v1/districtwarning',
       });
     }
@@ -196,7 +228,9 @@ export async function GET(req: NextRequest) {
       receivedTimestamp: new Date().toISOString(),
     }, {
       headers: {
-        'Cache-Control': 'public, max-age=300, stale-while-revalidate=60',
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+        'Expires': '0',
       },
     });
   } catch (err: any) {
