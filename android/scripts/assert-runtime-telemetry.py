@@ -15,7 +15,12 @@ def main() -> int:
     if "[METEOGIS_RUNTIME_VERIFIED]" not in log_line:
         raise AssertionError(f"Missing [METEOGIS_RUNTIME_VERIFIED] marker in line: {log_line}")
 
-    payload_raw = log_line.split("[METEOGIS_RUNTIME_VERIFIED]", 1)[1].strip()
+    after_marker = log_line.split("[METEOGIS_RUNTIME_VERIFIED]", 1)[1].strip()
+    start = after_marker.find("{")
+    end = after_marker.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise AssertionError(f"Could not locate JSON object in telemetry line: {log_line}")
+    payload_raw = after_marker[start : end + 1]
     data = json.loads(payload_raw)
     print(f"{label}_RUNTIME_PROOF={json.dumps(data, sort_keys=True)}")
 

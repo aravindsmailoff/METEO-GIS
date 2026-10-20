@@ -76,8 +76,7 @@ export async function runNativeRuntimeVerification(): Promise<void> {
     }
 
     console.info(
-      '[METEOGIS_RUNTIME_VERIFIED]',
-      JSON.stringify({
+      `[METEOGIS_RUNTIME_VERIFIED] ${JSON.stringify({
         activeApiBase: activeBase,
         nativeBuildProdUrl: nativeProdUrl,
         hazardsHttp: hazardsRes.status,
@@ -90,7 +89,7 @@ export async function runNativeRuntimeVerification(): Promise<void> {
         routeBadge: routeCheck.ok ? routeCheck.verificationBadge : routeCheck.title,
         routeVertices: routeCheck.ok ? routeCheck.overlay.coordinates.length : 0,
         sosDryRunStatus: sosDryCheckStatus,
-      })
+      })}`
     );
   } catch (err: any) {
     console.warn(
