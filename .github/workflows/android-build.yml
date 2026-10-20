@@ -6,6 +6,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      reuse_apk_run_id:
+        description: 'Optional existing run ID to test on device directly'
+        required: false
+        default: ''
 
 concurrency:
   group: android-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
@@ -13,10 +18,12 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   android-verify-and-build:
     name: Build, Sign & Binary-Audit Standalone APKs
+    if: ${{ inputs.reuse_apk_run_id == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -273,6 +280,7 @@ jobs:
   android-device-runtime-e2e:
     name: Install Signed APKs on Android 14 Device & Verify Live Runtime
     needs: android-verify-and-build
+    if: ${{ always() && (needs.android-verify-and-build.result == 'success' || inputs.reuse_apk_run_id != '') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -315,12 +323,16 @@ jobs:
         with:
           name: meteo-gis-android-release-apk
           path: /tmp/release-artifact
+          run-id: ${{ inputs.reuse_apk_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Standalone Signed Debug APK Artifact
         uses: actions/download-artifact@v4
         with:
           name: meteo-gis-android-debug-apk
           path: /tmp/debug-artifact
+          run-id: ${{ inputs.reuse_apk_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Boot Android 14 (API 34 x86_64) Device, Install Signed APKs & Verify Live Runtime
         run: /tmp/ci_exec.sh "Android 14 Device Install & Live Runtime E2E" bash android/scripts/run-device-runtime-e2e.sh

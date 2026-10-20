@@ -101,8 +101,14 @@ adb install -r /tmp/release-artifact/app-release.apk
 adb shell am start -W -n com.meteogis/.MainActivity
 
 REL_VERIFIED=""
-for i in $(seq 1 35); do
-  LINE=$(adb logcat -d ReactNativeJS:I *:S | grep "\[METEOGIS_RUNTIME_VERIFIED\]" | tail -n 1 || true)
+for i in $(seq 1 30); do
+  CRASH_DUMP=$(adb logcat -b crash -d 2>/dev/null || true)
+  if echo "${CRASH_DUMP}" | grep -q "com.meteogis"; then
+    echo "=== DETECTED CRASH IN -b crash BUFFER AT $((i * 2))s ==="
+    echo "${CRASH_DUMP}" | tail -n 55
+    exit 1
+  fi
+  LINE=$(adb logcat -d ReactNativeJS:V *:S | grep "\[METEOGIS_RUNTIME_VERIFIED\]" | tail -n 1 || true)
   if [ -n "${LINE}" ]; then
     REL_VERIFIED="${LINE}"
     break
@@ -111,11 +117,14 @@ for i in $(seq 1 35); do
 done
 
 adb logcat -d > "${PROOF_DIR}/logcat-release.txt"
+adb logcat -b crash -d > "${PROOF_DIR}/crash-release.txt"
 
 if [ -z "${REL_VERIFIED}" ]; then
-  echo "ERROR: Signed Release APK did not emit [METEOGIS_RUNTIME_VERIFIED] within 70s!"
-  echo "--- ReactNativeJS & Crash/Fatal Logs ---"
-  grep -E "ReactNativeJS|AndroidRuntime|DEBUG|libc|Fatal|MLRN|MapLibre" "${PROOF_DIR}/logcat-release.txt" | tail -n 55 || true
+  echo "ERROR: Signed Release APK did not emit [METEOGIS_RUNTIME_VERIFIED] within 60s!"
+  echo "=== CRASH BUFFER ==="
+  cat "${PROOF_DIR}/crash-release.txt" | tail -n 35 || true
+  echo "=== ReactNativeJS BUFFER ==="
+  adb logcat -d ReactNativeJS:V *:S | tail -n 30 || true
   exit 1
 fi
 
