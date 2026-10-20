@@ -23,7 +23,9 @@ class MainApplication : Application(), ReactApplication {
 
             override fun getJSMainModuleName(): String = "index"
 
-            override fun getUseDeveloperSupport(): Boolean = BuildConfig.DEBUG
+            // Standalone APKs load embedded `assets/index.android.bundle` directly without Metro.
+            // Pass `-PUSE_METRO_DEV=true` during local development to enable live Metro HMR.
+            override fun getUseDeveloperSupport(): Boolean = BuildConfig.USE_METRO_DEV_SERVER
 
             override val isNewArchEnabled: Boolean = BuildConfig.IS_NEW_ARCHITECTURE_ENABLED
             override val isHermesEnabled: Boolean = BuildConfig.IS_HERMES_ENABLED

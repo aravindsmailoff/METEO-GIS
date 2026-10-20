@@ -2,13 +2,16 @@ import React, { useEffect } from 'react';
 import { StatusBar, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { runNativeRuntimeVerification } from './src/safety/runtimeAudit';
 import { useAppStore } from './src/store/appStore';
 
 export default function App() {
   const hydratePreferences = useAppStore((s) => s.hydratePreferences);
 
   useEffect(() => {
-    hydratePreferences();
+    hydratePreferences().finally(() => {
+      runNativeRuntimeVerification();
+    });
   }, [hydratePreferences]);
 
   return (

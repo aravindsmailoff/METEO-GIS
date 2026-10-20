@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   android-verify-and-build:
-    name: Typecheck, Safety Suite, RN Bundle & Native Gradle APKs
+    name: Build, Sign & Binary-Audit Standalone APKs
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -41,7 +41,7 @@ jobs:
             echo "::error title=${TITLE} (exit ${RC})::${ENCODED}"
             exit "$RC"
           fi
-          SUMMARY_TAIL=$(tail -n 18 "$LOG" | tr -d '\r')
+          SUMMARY_TAIL=$(tail -n 26 "$LOG" | tr -d '\r')
           SUM_ENC="${SUMMARY_TAIL//'%'/'%25'}"
           SUM_ENC="${SUM_ENC//$'\n'/'%0A'}"
           echo "::notice title=${TITLE} (exit 0)::${SUM_ENC}"
@@ -64,8 +64,6 @@ jobs:
           java-version: '17'
 
       - name: Ensure Android SDK 35/34, Build-Tools 35.0.0, NDK 26.1.10909125 & CMake 3.22.1
-        env:
-          CMAKE_BUILD_PARALLEL_LEVEL: '4'
         run: |
           /tmp/ci_exec.sh "Android SDK Setup" bash -c '
             set -euo pipefail
@@ -113,7 +111,6 @@ jobs:
 
             printf "sdk.dir=%s\n" "${SDK_ROOT}" > android/android/local.properties
             java -version
-            echo "Verified SDK packages at ${SDK_ROOT}: platforms/android-35, build-tools/35.0.0, ndk/26.1.10909125, cmake/3.22.1"
           '
 
       - name: Set up Gradle cache
@@ -126,50 +123,71 @@ jobs:
         working-directory: android
         run: /tmp/ci_exec.sh "Step 2 - Android tsc" npm run typecheck
 
-      - name: 3. Run Android automated safety & integrity test suite
+      - name: 3. Run Android safety, bundle hygiene & integrity test suite
         working-directory: android
-        run: /tmp/ci_exec.sh "Step 3 - Android Safety Tests" npm test
+        run: /tmp/ci_exec.sh "Step 3 - Android Safety & Bundle Suite" npm test
 
       - name: 4. Run Web TypeScript check
         run: /tmp/ci_exec.sh "Step 4 - Web tsc" npx tsc --noEmit
 
-      - name: 5. Build React Native Android JS bundle
-        working-directory: android
+      - name: 5. Prepare Android Release Signing Keystore in ephemeral RAM (`$RUNNER_TEMP`)
+        env:
+          SECRET_KEYSTORE_B64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          SECRET_STORE_PASS: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          SECRET_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          SECRET_KEY_PASS: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
         run: |
-          /tmp/ci_exec.sh "Step 5 - RN Android Bundle" bash -c '
-            set -euo pipefail
-            mkdir -p /tmp/meteogis-rn-bundle/assets
-            npx react-native bundle \
-              --platform android \
-              --dev false \
-              --entry-file index.js \
-              --bundle-output /tmp/meteogis-rn-bundle/index.android.bundle \
-              --assets-dest /tmp/meteogis-rn-bundle/assets
-            ls -lh /tmp/meteogis-rn-bundle/index.android.bundle
-          '
+          set -euo pipefail
+          if find . -maxdepth 5 \( -name "*.keystore" -o -name "*.jks" -o -name "*.p12" \) | grep -q .; then
+            echo "::error title=Keystore Leak Blocked::Found committed keystore file in repository!"
+            exit 1
+          fi
 
-      - name: 6. Verify Gradle wrapper & version (`./gradlew --version`)
-        working-directory: android/android
-        run: /tmp/ci_exec.sh "Step 6 - Gradle Version" ./gradlew --version
+          KEYSTORE_PATH="${RUNNER_TEMP}/meteogis-release-signing.p12"
+          if [ -n "${SECRET_KEYSTORE_B64}" ] && [ -n "${SECRET_STORE_PASS}" ] && [ -n "${SECRET_KEY_ALIAS}" ] && [ -n "${SECRET_KEY_PASS}" ]; then
+            printf "%s" "${SECRET_KEYSTORE_B64}" | base64 -d > "${KEYSTORE_PATH}"
+            chmod 600 "${KEYSTORE_PATH}"
+            echo "RELEASE_STORE_FILE=${KEYSTORE_PATH}" >> "${GITHUB_ENV}"
+            echo "RELEASE_STORE_PASSWORD=${SECRET_STORE_PASS}" >> "${GITHUB_ENV}"
+            echo "RELEASE_KEY_ALIAS=${SECRET_KEY_ALIAS}" >> "${GITHUB_ENV}"
+            echo "RELEASE_KEY_PASSWORD=${SECRET_KEY_PASS}" >> "${GITHUB_ENV}"
+            echo "SIGNING_PROVENANCE=production_github_secret" >> "${GITHUB_ENV}"
+            echo "::notice title=Release Signing Configured::Using encrypted GitHub Actions production signing secrets."
+          else
+            if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+              echo "::error title=Missing Production Signing Secret::Tagged production releases strictly require ANDROID_RELEASE_KEYSTORE_BASE64 in GitHub Secrets."
+              exit 1
+            fi
+            EPHEMERAL_PASS="$(openssl rand -hex 32)"
+            echo "::add-mask::${EPHEMERAL_PASS}"
+            keytool -genkeypair \
+              -storetype PKCS12 \
+              -keystore "${KEYSTORE_PATH}" \
+              -alias "meteogis-ci-release" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 365 \
+              -storepass "${EPHEMERAL_PASS}" \
+              -keypass "${EPHEMERAL_PASS}" \
+              -dname "CN=MeteoGIS Standalone CI Release, OU=Mobile Engineering, O=MeteoGIS, L=Chennai, ST=Tamil Nadu, C=IN" >/dev/null 2>&1
+            chmod 600 "${KEYSTORE_PATH}"
+            echo "RELEASE_STORE_FILE=${KEYSTORE_PATH}" >> "${GITHUB_ENV}"
+            echo "RELEASE_STORE_PASSWORD=${EPHEMERAL_PASS}" >> "${GITHUB_ENV}"
+            echo "RELEASE_KEY_ALIAS=meteogis-ci-release" >> "${GITHUB_ENV}"
+            echo "RELEASE_KEY_PASSWORD=${EPHEMERAL_PASS}" >> "${GITHUB_ENV}"
+            echo "SIGNING_PROVENANCE=ephemeral_ci_keystore_in_runner_temp" >> "${GITHUB_ENV}"
+            echo "::notice title=Release Signing Configured::Generated single-use RSA-2048 PKCS#12 signing key in ephemeral RUNNER_TEMP (configure ANDROID_RELEASE_KEYSTORE_BASE64 for persistent Play Store upgrades)."
+          fi
 
-      - name: 7. Assemble native Android Debug APK (`./gradlew assembleDebug`)
+      - name: 6. Verify Gradle wrapper, API config guard & signing guard
         working-directory: android/android
         run: |
-          /tmp/ci_exec.sh "Step 7 - assembleDebug" bash -c '
+          /tmp/ci_exec.sh "Step 6 - Gradle & Release Guards" bash -c '
             set -euo pipefail
-            ./gradlew assembleDebug --parallel --stacktrace
-            ls -lh app/build/outputs/apk/debug/app-debug.apk
-            stat -c "DEBUG_APK_BYTES=%s %n" app/build/outputs/apk/debug/app-debug.apk
-            sha256sum app/build/outputs/apk/debug/app-debug.apk
-          '
-
-      - name: 8. Directly verify release API configuration (`./gradlew verifyReleaseApiConfig` positive & negative checks)
-        working-directory: android/android
-        run: |
-          /tmp/ci_exec.sh "Step 8 - verifyReleaseApiConfig" bash -c '
-            set -euo pipefail
+            ./gradlew --version
             ./gradlew verifyReleaseApiConfig
             ./gradlew verifyReleaseApiConfig -PPROD_API_URL=https://meteo-gis.vercel.app
+            ./gradlew verifyReleaseSigningConfig
 
             for BAD_URL in \
               "http://meteo-gis.vercel.app" \
@@ -179,83 +197,274 @@ jobs:
               "https://api.example.com"
             do
               if ./gradlew verifyReleaseApiConfig "-PPROD_API_URL=${BAD_URL}" >/dev/null 2>&1; then
-                echo "ERROR: verifyReleaseApiConfig unexpectedly accepted unsafe URL: ${BAD_URL}"
+                echo "ERROR: verifyReleaseApiConfig accepted unsafe URL: ${BAD_URL}"
                 exit 1
-              else
-                echo "Confirmed blocked unsafe release URL: ${BAD_URL}"
               fi
+              echo "Confirmed blocked unsafe URL: ${BAD_URL}"
             done
+
+            if env -u RELEASE_STORE_FILE -u RELEASE_STORE_PASSWORD -u RELEASE_KEY_ALIAS -u RELEASE_KEY_PASSWORD \
+              ./gradlew verifyReleaseSigningConfig >/dev/null 2>&1; then
+              echo "ERROR: verifyReleaseSigningConfig allowed unsigned release build without credentials!"
+              exit 1
+            fi
+            echo "Confirmed unsigned release builds are blocked by default."
           '
 
-      - name: 9. Assemble native Android Release APK (`./gradlew assembleRelease -PPROD_API_URL=https://meteo-gis.vercel.app`)
+      - name: 7. Assemble Standalone Signed Debug APK (`app-debug.apk` with embedded `assets/index.android.bundle`)
         working-directory: android/android
         run: |
-          /tmp/ci_exec.sh "Step 9 - assembleRelease" bash -c '
+          /tmp/ci_exec.sh "Step 7 - Standalone Debug APK" bash -c '
+            set -euo pipefail
+            ./gradlew assembleDebug --parallel --stacktrace
+            ls -lh app/build/outputs/apk/debug/app-debug.apk
+          '
+
+      - name: 8. Assemble Standalone Signed Release APK (`app-release.apk` with `PROD_API_URL=https://meteo-gis.vercel.app`)
+        working-directory: android/android
+        run: |
+          /tmp/ci_exec.sh "Step 8 - Signed Release APK" bash -c '
             set -euo pipefail
             ./gradlew assembleRelease -PPROD_API_URL=https://meteo-gis.vercel.app --parallel --stacktrace
-            ls -lh app/build/outputs/apk/release/
-            stat -c "RELEASE_APK_BYTES=%s %n" app/build/outputs/apk/release/*.apk
-            sha256sum app/build/outputs/apk/release/*.apk
+            ls -lh app/build/outputs/apk/release/app-release.apk
           '
 
-      - name: Non-destructive live `https://meteo-gis.vercel.app` contract check (zero SOS or emergency calls)
+      - name: 9. Verify v1/v2/v3 APK Signatures, Standalone JS Bundles & Zero Dev URLs in Binary APKs
+        working-directory: android/android
         run: |
-          /tmp/ci_exec.sh "Live Vercel Non-Destructive Contract Check" node -e '
-            (async () => {
-              const base = "https://meteo-gis.vercel.app";
-              const getCheck = async (path) => {
-                const r = await fetch(base + path);
-                if (!r.ok) throw new Error(`${path} returned HTTP ${r.status}`);
-                const j = await r.json();
-                console.log(`[OK] GET ${path} -> HTTP ${r.status}, keys=${Object.keys(j).join(",")}`);
-                return j;
-              };
-              await getCheck("/api/live/hazards");
-              await getCheck("/api/live/warnings");
-              await getCheck("/api/live/stations");
-              await getCheck("/api/roads/incidents");
+          /tmp/ci_exec.sh "Step 9 - APK Signature & Binary Bundle Audit" bash -c '
+            set -euo pipefail
+            APKSIGNER="${ANDROID_HOME}/build-tools/35.0.0/apksigner"
+            REL_APK="app/build/outputs/apk/release/app-release.apk"
+            DBG_APK="app/build/outputs/apk/debug/app-debug.apk"
 
-              const riskRes = await fetch(base + "/api/risk/predict", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  district: "East Sikkim",
-                  latitude: 27.3389,
-                  longitude: 88.6065,
-                  coordinates: [27.3389, 88.6065],
-                  features: { rainfall_1h: 12.0, rainfall_24h: 48.0 }
-                })
-              });
-              if (!riskRes.ok) throw new Error(`/api/risk/predict returned HTTP ${riskRes.status}`);
-              const riskJson = await riskRes.json();
-              console.log(`[OK] POST /api/risk/predict -> prob=${riskJson.landslide_probability}, risk_level=${riskJson.risk_level}`);
+            if [ -f "app/build/outputs/apk/release/app-release-unsigned.apk" ]; then
+              echo "ERROR: Unsigned APK found instead of signed app-release.apk!"
+              exit 1
+            fi
 
-              const routeRes = await fetch(base + "/api/routing/safe-route", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  origin: { lat: 13.0827, lon: 80.2707 },
-                  destination: { lat: 13.2027, lon: 80.1707 },
-                  costing: "auto",
-                  avoid_disasters: true
-                })
-              });
-              if (!routeRes.ok) throw new Error(`/api/routing/safe-route returned HTTP ${routeRes.status}`);
-              const routeJson = await routeRes.json();
-              console.log(`[OK] POST /api/routing/safe-route -> status=${routeJson.status}, engine=${routeJson.debug_info?.engine}`);
-            })().catch((e) => { console.error(e); process.exit(1); });
+            echo "=== Release APK Signature Verification ==="
+            "${APKSIGNER}" verify --verbose --print-certs "${REL_APK}" | head -n 16
+
+            echo "=== Debug APK Signature Verification ==="
+            "${APKSIGNER}" verify --verbose "${DBG_APK}" | head -n 10
+
+            python3 ../scripts/verify-apk-binaries.py "${REL_APK}" "${DBG_APK}"
           '
 
-      - name: Upload native Android Debug APK artifact
+      - name: Upload Standalone Signed Release APK (`app-release.apk`)
+        uses: actions/upload-artifact@v4
+        with:
+          name: meteo-gis-android-release-apk
+          path: android/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Upload Standalone Signed Debug APK (`app-debug.apk`)
         uses: actions/upload-artifact@v4
         with:
           name: meteo-gis-android-debug-apk
           path: android/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
-      - name: Upload native Android Release APK artifact
-        uses: actions/upload-artifact@v4
+      - name: Shred ephemeral signing keystore (`always()`)
+        if: always()
+        run: rm -rf "${RUNNER_TEMP}"/*.p12 "${RUNNER_TEMP}"/*.jks || true
+
+  android-device-runtime-e2e:
+    name: Install Signed APKs on Android 14 Device & Verify Live Runtime
+    needs: android-verify-and-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Prepare CI step runner with full annotations
+        run: |
+          cat << 'EOF' > /tmp/ci_exec.sh
+          #!/usr/bin/env bash
+          set -o pipefail
+          TITLE="$1"
+          shift
+          LOG="/tmp/ci_step_$(date +%s%N).log"
+          "$@" 2>&1 | tee "$LOG"
+          RC=${PIPESTATUS[0]}
+          TAIL_RAW=$(tail -n 65 "$LOG" | tr -d '\r')
+          ENCODED="${TAIL_RAW//'%'/'%25'}"
+          ENCODED="${ENCODED//$'\n'/'%0A'}"
+          if [ "$RC" -ne 0 ]; then
+            echo "::error title=${TITLE} (exit ${RC})::${ENCODED}"
+            exit "$RC"
+          fi
+          SUMMARY_TAIL=$(tail -n 26 "$LOG" | tr -d '\r')
+          SUM_ENC="${SUMMARY_TAIL//'%'/'%25'}"
+          SUM_ENC="${SUM_ENC//$'\n'/'%0A'}"
+          echo "::notice title=${TITLE} (exit 0)::${SUM_ENC}"
+          EOF
+          chmod +x /tmp/ci_exec.sh
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Download Signed Standalone Release APK Artifact
+        uses: actions/download-artifact@v4
         with:
           name: meteo-gis-android-release-apk
-          path: android/android/app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
+          path: /tmp/release-artifact
+
+      - name: Download Standalone Signed Debug APK Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: meteo-gis-android-debug-apk
+          path: /tmp/debug-artifact
+
+      - name: Boot Android 14 (API 34 x86_64) Device, Install Signed APKs & Verify Live Runtime
+        run: |
+          /tmp/ci_exec.sh "Android 14 Device Install & Live Runtime E2E" bash -c '
+            set -euo pipefail
+            mkdir -p /tmp/device-proof
+
+            sudo apt-get update -y >/dev/null
+            sudo apt-get install -y libpulse0 libnss3 libxcomposite1 libxcursor1 libxi6 libxtst6 libgl1 libxcb-cursor0 >/dev/null || true
+            if [ -e /dev/kvm ]; then
+              sudo chmod 666 /dev/kvm || true
+            fi
+
+            SDK_ROOT="/usr/local/lib/android/sdk"
+            if [ ! -x "${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" ]; then
+              SDK_ROOT="${HOME}/android-sdk"
+              mkdir -p "${SDK_ROOT}/cmdline-tools"
+              curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/cmdtools.zip
+              unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools_unpack
+              mv /tmp/cmdtools_unpack/cmdline-tools "${SDK_ROOT}/cmdline-tools/latest"
+            fi
+            export ANDROID_HOME="${SDK_ROOT}"
+            export ANDROID_SDK_ROOT="${SDK_ROOT}"
+            export PATH="${SDK_ROOT}/cmdline-tools/latest/bin:${SDK_ROOT}/emulator:${SDK_ROOT}/platform-tools:${PATH}"
+
+            yes | sdkmanager --sdk_root="${SDK_ROOT}" --licenses >/dev/null || true
+            sdkmanager --sdk_root="${SDK_ROOT}" --install \
+              "platform-tools" \
+              "emulator" \
+              "platforms;android-34" \
+              "system-images;android-34;default;x86_64" >/dev/null
+
+            echo "no" | avdmanager create avd -n meteogis_api34 -k "system-images;android-34;default;x86_64" --device "pixel_6" --force
+
+            nohup "${SDK_ROOT}/emulator/emulator" \
+              -avd meteogis_api34 \
+              -no-window \
+              -no-audio \
+              -no-boot-anim \
+              -no-snapshot \
+              -gpu swiftshader_indirect \
+              -memory 4096 \
+              -cores 4 \
+              -dns-server 8.8.8.8,1.1.1.1 >/tmp/device-proof/emulator.log 2>&1 &
+            EMU_PID=$!
+
+            adb wait-for-device
+            for i in $(seq 1 90); do
+              BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r" || true)
+              if [ "$BOOT" = "1" ]; then
+                echo "Android 14 device booted in $((i * 2))s!"
+                break
+              fi
+              sleep 2
+            done
+
+            adb shell input keyevent 82 || true
+            sleep 2
+            adb logcat -c
+
+            # 1. Install & Cold-Launch Signed Standalone RELEASE APK (Zero Metro Server)
+            echo "=== Installing Signed Release APK ==="
+            adb install -r /tmp/release-artifact/app-release.apk
+            adb shell am start -W -n com.meteogis/.MainActivity
+
+            REL_VERIFIED=""
+            for i in $(seq 1 30); do
+              LINE=$(adb logcat -d ReactNativeJS:I *:S | grep "\[METEOGIS_RUNTIME_VERIFIED\]" | tail -n 1 || true)
+              if [ -n "$LINE" ]; then
+                REL_VERIFIED="$LINE"
+                break
+              fi
+              sleep 2
+            done
+            adb logcat -d > /tmp/device-proof/logcat-release.txt
+
+            if [ -z "$REL_VERIFIED" ]; then
+              echo "ERROR: Release APK did not emit [METEOGIS_RUNTIME_VERIFIED]!"
+              grep -E "AndroidRuntime|ReactNativeJS" /tmp/device-proof/logcat-release.txt | tail -n 40 || true
+              exit 1
+            fi
+            python3 android/scripts/assert-runtime-telemetry.py "RELEASE" "$REL_VERIFIED"
+
+            sleep 2
+            adb exec-out screencap -p > /tmp/device-proof/01-release-map.png
+            adb shell uiautomator dump /sdcard/ui_release_map.xml >/dev/null
+            adb pull /sdcard/ui_release_map.xml /tmp/device-proof/01-release-map.xml >/dev/null
+
+            adb shell input tap 945 2290
+            sleep 2
+            adb exec-out screencap -p > /tmp/device-proof/02-release-settings-https-locked.png
+            adb shell uiautomator dump /sdcard/ui_release_settings.xml >/dev/null
+            adb pull /sdcard/ui_release_settings.xml /tmp/device-proof/02-release-settings.xml >/dev/null
+
+            # Assert release Settings UI shows https://meteo-gis.vercel.app and hides ALL dev switcher UI
+            grep -q "https://meteo-gis.vercel.app" /tmp/device-proof/02-release-settings.xml
+            if grep -qE "10\.0\.2\.2|127\.0\.0\.1|Emulator|ADB Reverse" /tmp/device-proof/02-release-settings.xml; then
+              echo "ERROR: Dev gateway switcher leaked into release UI!"
+              exit 1
+            fi
+            if grep -A 5 "FATAL EXCEPTION" /tmp/device-proof/logcat-release.txt | grep -q "com.meteogis"; then
+              echo "ERROR: FATAL EXCEPTION in release APK!"
+              exit 1
+            fi
+
+            # 2. Uninstall Release APK, Install & Cold-Launch Standalone DEBUG APK (Zero Metro Server!)
+            adb uninstall com.meteogis
+            adb logcat -c
+            echo "=== Installing Standalone Debug APK ==="
+            adb install -r /tmp/debug-artifact/app-debug.apk
+            adb shell am start -W -n com.meteogis/.MainActivity
+
+            DBG_VERIFIED=""
+            for i in $(seq 1 30); do
+              LINE=$(adb logcat -d ReactNativeJS:I *:S | grep "\[METEOGIS_RUNTIME_VERIFIED\]" | tail -n 1 || true)
+              if [ -n "$LINE" ]; then
+                DBG_VERIFIED="$LINE"
+                break
+              fi
+              sleep 2
+            done
+            adb logcat -d > /tmp/device-proof/logcat-debug.txt
+
+            if [ -z "$DBG_VERIFIED" ]; then
+              echo "ERROR: Standalone Debug APK failed to boot without Metro!"
+              grep -E "AndroidRuntime|ReactNativeJS" /tmp/device-proof/logcat-debug.txt | tail -n 40 || true
+              exit 1
+            fi
+            python3 android/scripts/assert-runtime-telemetry.py "DEBUG_STANDALONE" "$DBG_VERIFIED"
+            adb exec-out screencap -p > /tmp/device-proof/03-standalone-debug-map.png
+
+            if grep -A 5 "FATAL EXCEPTION" /tmp/device-proof/logcat-debug.txt | grep -q "com.meteogis"; then
+              echo "ERROR: FATAL EXCEPTION in standalone debug APK!"
+              exit 1
+            fi
+
+            ls -lh /tmp/device-proof/
+            kill "$EMU_PID" >/dev/null 2>&1 || true
+          '
+
+      - name: Upload Live Android 14 Device Screenshots, UI Dumps & Runtime Logcat Proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meteo-gis-device-runtime-proof
+          path: /tmp/device-proof/*
+          if-no-files-found: warn

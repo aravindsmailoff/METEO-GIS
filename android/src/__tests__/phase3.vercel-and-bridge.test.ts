@@ -1,4 +1,6 @@
+import { execFileSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -111,5 +113,43 @@ describe('Phase 3 Vercel Production Configuration, Shared Caller Audit & WebView
       targetUri,
     });
     expect(badType.valid).toBe(false);
+  });
+
+  it('compiles a minified Android production JS bundle containing ZERO local development URLs (`10.0.2.2`, `127.0.0.1`, `http://localhost:3000`, `METEOGIS_PROD_API_URL`)', () => {
+    const androidProjectRoot = path.resolve(__dirname, '../..');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meteogis-prod-bundle-'));
+    const bundlePath = path.join(tmpDir, 'index.android.bundle');
+
+    try {
+      execFileSync(
+        'npx',
+        [
+          'react-native',
+          'bundle',
+          '--platform',
+          'android',
+          '--dev',
+          'false',
+          '--minify',
+          'true',
+          '--entry-file',
+          'index.js',
+          '--bundle-output',
+          bundlePath,
+        ],
+        { cwd: androidProjectRoot, stdio: 'pipe', timeout: 40000 }
+      );
+
+      const bundleText = fs.readFileSync(bundlePath, 'utf-8');
+      expect(bundleText).toContain('https://meteo-gis.vercel.app');
+      expect(bundleText).not.toContain('http://10.0.2.2:3000');
+      expect(bundleText).not.toContain('http://127.0.0.1:3000');
+      expect(bundleText).not.toContain('http://localhost:3000');
+      expect(bundleText).not.toContain('10.0.2.2');
+      expect(bundleText).not.toContain('127.0.0.1');
+      expect(bundleText).not.toContain('METEOGIS_PROD_API_URL');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
