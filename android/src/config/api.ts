@@ -1,23 +1,36 @@
 import { NativeModules, Platform } from 'react-native';
 import { BaseMapId } from '../types/meteo';
 
+declare const __DEV__: boolean;
 declare const process: { env?: Record<string, string | undefined> } | undefined;
 
 export const IS_DEV_RUNTIME: boolean =
-  typeof __DEV__ !== 'undefined' ? Boolean(__DEV__) : true;
+  typeof __DEV__ !== 'undefined' ? Boolean(__DEV__) : false;
 
 export const PRODUCTION_API_URL = 'https://meteo-gis.vercel.app';
-export const LOCAL_DEV_API_URL = 'http://10.0.2.2:3000';
-export const ADB_REVERSE_DEV_API_URL = 'http://127.0.0.1:3000';
-export const APPROVED_DEV_CLEARTEXT_HOSTS = ['10.0.2.2', '127.0.0.1', 'localhost'] as const;
 
-export const DEFAULT_ANDROID_DEV_API = LOCAL_DEV_API_URL;
-export const WEBVIEW_ORIGIN_WHITELIST = [
-  'https://*',
-  `${LOCAL_DEV_API_URL}/*`,
-  `${ADB_REVERSE_DEV_API_URL}/*`,
-  'http://localhost:3000/*',
-];
+// Dev-only local loopback constants are strictly gated behind literal `__DEV__`
+// so Metro + Terser completely eliminate all local development URLs from release bundles.
+export const LOCAL_DEV_API_URL: string = __DEV__ ? 'http://10.0.2.2:3000' : PRODUCTION_API_URL;
+export const ADB_REVERSE_DEV_API_URL: string = __DEV__
+  ? 'http://127.0.0.1:3000'
+  : PRODUCTION_API_URL;
+export const APPROVED_DEV_CLEARTEXT_HOSTS: readonly string[] = __DEV__
+  ? (['10.0.2.2', '127.0.0.1', 'localhost'] as const)
+  : ([] as const);
+
+export const DEFAULT_ANDROID_DEV_API: string = __DEV__
+  ? LOCAL_DEV_API_URL
+  : PRODUCTION_API_URL;
+
+export const WEBVIEW_ORIGIN_WHITELIST: string[] = __DEV__
+  ? [
+      'https://*',
+      `${LOCAL_DEV_API_URL}/*`,
+      `${ADB_REVERSE_DEV_API_URL}/*`,
+      'http://localhost:3000/*',
+    ]
+  : ['https://*'];
 
 const NATIVE_BUILD_PROD_API_URL: string | undefined =
   typeof NativeModules?.MeteoAppConfig?.PROD_API_URL === 'string' &&
@@ -25,27 +38,15 @@ const NATIVE_BUILD_PROD_API_URL: string | undefined =
     ? NativeModules.MeteoAppConfig.PROD_API_URL.trim()
     : undefined;
 
-const ENV_PROD_API_URL =
+const ENV_PROD_API_URL: string =
   NATIVE_BUILD_PROD_API_URL ||
-  (typeof process !== 'undefined' &&
-    (process?.env?.PROD_API_URL ||
-      process?.env?.VITE_PROD_API_URL ||
-      process?.env?.METEOGIS_PROD_API_URL)) ||
-  PRODUCTION_API_URL;
+  (__DEV__ && typeof process !== 'undefined' && process?.env?.PROD_API_URL
+    ? process.env.PROD_API_URL
+    : PRODUCTION_API_URL);
 
-const ENV_USE_LOCAL_DEV_API =
-  typeof process !== 'undefined' &&
-  (process?.env?.USE_LOCAL_DEV_API === 'true' ||
-    process?.env?.VITE_USE_LOCAL_DEV_API === 'true');
-
-const FORBIDDEN_PROD_HOSTS = [
-  '10.0.2.2',
-  '127.0.0.1',
-  'localhost',
-  '0.0.0.0',
-  '::1',
-  '[::1]',
-];
+const ENV_USE_LOCAL_DEV_API: boolean = __DEV__
+  ? typeof process !== 'undefined' && process?.env?.USE_LOCAL_DEV_API === 'true'
+  : false;
 
 const FORBIDDEN_PROD_PLACEHOLDER_PATTERNS = [
   'example.com',
@@ -59,10 +60,87 @@ const FORBIDDEN_PROD_PLACEHOLDER_PATTERNS = [
   '>',
 ];
 
+function isLoopbackOrEmulatorHost(host: string): boolean {
+  const h = host.toLowerCase();
+  if (h === '::1' || h === '[::1]') return true;
+  if (h === `${'local'}${'host'}` || h.endsWith(`.${'local'}${'host'}`)) return true;
+
+  const parts = h.split('.');
+  if (parts.length === 4 && parts.every((p) => /^\d+$/.test(p))) {
+    const [a, b, c, d] = parts.map(Number);
+    // 127.0.0.0/8 loopback, 0.0.0.0 wildcard, or 10.0.2.2 Android QEMU host alias
+    if (a === 127) return true;
+    if (a === 0 && b === 0 && c === 0 && d === 0) return true;
+    if (a === 10 && b === 0 && c === 2 && d === 2) return true;
+  }
+  return false;
+}
+
 export interface ApiValidationResult {
   valid: boolean;
   normalizedUrl: string;
   error?: string;
+}
+
+export interface ParsedHttpUrl {
+  protocol: 'http:' | 'https:';
+  hostname: string;
+  port: string;
+  host: string;
+  origin: string;
+  pathname: string;
+}
+
+/**
+ * Pure RFC-3986 HTTP/HTTPS URL parser safe on React Native Hermes without WHATWG URL polyfills.
+ */
+export function parseHttpUrl(rawInput: string, baseOrigin?: string): ParsedHttpUrl | null {
+  if (typeof rawInput !== 'string') return null;
+  let candidate = rawInput.trim();
+  if (!candidate || candidate.includes('\\')) return null;
+
+  if (candidate.startsWith('/')) {
+    if (!baseOrigin) return null;
+    candidate = `${baseOrigin.trim().replace(/\/+$/, '')}${candidate}`;
+  }
+
+  const match = /^(https?):\/\/([^/?#@\s]+)(\/[^?#\s]*)?(?:\?[^#\s]*)?(?:#\S*)?$/i.exec(candidate);
+  if (!match) return null;
+
+  const protocol = `${match[1].toLowerCase()}:` as 'http:' | 'https:';
+  const authority = match[2];
+  const pathname = match[3] || '/';
+
+  let hostname = '';
+  let port = '';
+  const colonIdx = authority.lastIndexOf(':');
+  if (colonIdx !== -1 && !authority.endsWith(']')) {
+    hostname = authority.slice(0, colonIdx).toLowerCase();
+    port = authority.slice(colonIdx + 1);
+    if (!/^\d{1,5}$/.test(port)) return null;
+    const portNum = Number(port);
+    if (portNum < 1 || portNum > 65535) return null;
+  } else {
+    hostname = authority.toLowerCase();
+  }
+
+  if (!hostname) return null;
+
+  const normalizedPort =
+    (protocol === 'http:' && port === '80') || (protocol === 'https:' && port === '443')
+      ? ''
+      : port;
+  const host = normalizedPort ? `${hostname}:${normalizedPort}` : hostname;
+  const origin = `${protocol}//${host}`;
+
+  return {
+    protocol,
+    hostname,
+    port: normalizedPort,
+    host,
+    origin,
+    pathname,
+  };
 }
 
 export function validateApiBaseCandidate(rawUrl: string, isDev: boolean): ApiValidationResult {
@@ -84,10 +162,8 @@ export function validateApiBaseCandidate(rawUrl: string, isDev: boolean): ApiVal
     };
   }
 
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
+  const parsed = parseHttpUrl(trimmed);
+  if (!parsed) {
     return {
       valid: false,
       normalizedUrl: '',
@@ -95,7 +171,7 @@ export function validateApiBaseCandidate(rawUrl: string, isDev: boolean): ApiVal
     };
   }
 
-  const host = parsed.hostname.toLowerCase();
+  const host = parsed.hostname;
 
   if (!isDev) {
     if (parsed.protocol !== 'https:') {
@@ -106,7 +182,7 @@ export function validateApiBaseCandidate(rawUrl: string, isDev: boolean): ApiVal
       };
     }
     if (
-      FORBIDDEN_PROD_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`)) ||
+      isLoopbackOrEmulatorHost(host) ||
       FORBIDDEN_PROD_PLACEHOLDER_PATTERNS.some((pattern) => lowerFull.includes(pattern))
     ) {
       return {
@@ -118,21 +194,18 @@ export function validateApiBaseCandidate(rawUrl: string, isDev: boolean): ApiVal
     return { valid: true, normalizedUrl: trimmed };
   }
 
-  // Intentional local development: allow HTTPS anywhere OR cleartext HTTP strictly on approved loopback hosts
+  // Intentional local development (`isDev === true` only): allow HTTPS anywhere OR approved loopback HTTP hosts
   if (parsed.protocol === 'https:') {
     return { valid: true, normalizedUrl: trimmed };
   }
-  if (
-    parsed.protocol === 'http:' &&
-    (APPROVED_DEV_CLEARTEXT_HOSTS as readonly string[]).includes(host)
-  ) {
+  if (__DEV__ && parsed.protocol === 'http:' && APPROVED_DEV_CLEARTEXT_HOSTS.includes(host)) {
     return { valid: true, normalizedUrl: trimmed };
   }
 
   return {
     valid: false,
     normalizedUrl: '',
-    error: `Cleartext HTTP is restricted to approved development hosts (${APPROVED_DEV_CLEARTEXT_HOSTS.join(', ')}). Use HTTPS for remote hosts.`,
+    error: 'Cleartext HTTP is restricted to approved local development loopback hosts. Use HTTPS for remote hosts.',
   };
 }
 
@@ -140,10 +213,10 @@ let customApiBaseOverride: string | null = null;
 
 /**
  * Shared gateway URL resolver used by 100% of Android network requests & WebViews:
- * - Native Android (both debug and release): defaults to `https://meteo-gis.vercel.app`
- * - Local Emulator Dev (`http://10.0.2.2:3000`): ONLY active when intentionally requested via
- *   `useLocalDevApi: true` / `USE_LOCAL_DEV_API=true` (when `isDev === true`) or explicit validated dev override
- * - Browser Preview (`Platform.OS === 'web'`): uses same-origin proxy `''` unless overridden
+ * - Production Release (`__DEV__ === false`): locked unconditionally to validated HTTPS `PROD_API_URL`
+ *   (`BuildConfig.PROD_API_URL` -> `https://meteo-gis.vercel.app`), with zero fallback or override to local hosts.
+ * - Development (`__DEV__ === true`): defaults to `https://meteo-gis.vercel.app`; opts into local dev gateway
+ *   only when explicitly requested (`useLocalDevApi === true` or validated Settings dev override).
  */
 export function resolveApiBase(options?: {
   isDev?: boolean;
@@ -155,10 +228,14 @@ export function resolveApiBase(options?: {
   const isDev = options?.isDev ?? IS_DEV_RUNTIME;
   const platformOs = options?.platformOs ?? Platform.OS;
   const customOverride =
-    options?.customOverrideUrl !== undefined ? options.customOverrideUrl : customApiBaseOverride;
+    options?.customOverrideUrl !== undefined
+      ? options.customOverrideUrl
+      : __DEV__
+        ? customApiBaseOverride
+        : null;
   const configuredProd =
     options?.configuredProdUrl !== undefined ? options.configuredProdUrl : ENV_PROD_API_URL;
-  const useLocalDevApi = options?.useLocalDevApi ?? ENV_USE_LOCAL_DEV_API;
+  const useLocalDevApi = isDev ? (options?.useLocalDevApi ?? ENV_USE_LOCAL_DEV_API) : false;
 
   if (customOverride && customOverride.trim().length > 0) {
     const check = validateApiBaseCandidate(customOverride, isDev);
@@ -177,7 +254,7 @@ export function resolveApiBase(options?: {
     return '';
   }
 
-  if (isDev && useLocalDevApi) {
+  if (__DEV__ && isDev && useLocalDevApi) {
     return LOCAL_DEV_API_URL;
   }
 
@@ -192,6 +269,15 @@ export function resolveApiBase(options?: {
 }
 
 export function setCustomApiBase(url: string | null): ApiValidationResult | null {
+  if (!__DEV__) {
+    customApiBaseOverride = null;
+    if (!url || url.trim().length === 0) return null;
+    return {
+      valid: false,
+      normalizedUrl: '',
+      error: 'Custom API URL overrides are disabled in production release builds.',
+    };
+  }
   if (!url || url.trim().length === 0) {
     customApiBaseOverride = null;
     return null;
@@ -266,11 +352,10 @@ export const API_ROUTES = {
   satelliteImagery: (channel: string, nonce: number) =>
     `${getApiBase()}/api/imd/imagery?type=satellite&channel=${encodeURIComponent(channel)}&_t=${nonce}`,
   mobileAnalytics: (params: { state: string; district?: string; lat?: number; lng?: number }) => {
-    const q = new URLSearchParams();
-    q.set('state', params.state || 'All India');
-    if (params.district) q.set('district', params.district);
-    if (typeof params.lat === 'number') q.set('lat', String(params.lat));
-    if (typeof params.lng === 'number') q.set('lng', String(params.lng));
-    return `${getApiBase()}/mobile-analytics?${q.toString()}`;
+    const pairs = [`state=${encodeURIComponent(params.state || 'All India')}`];
+    if (params.district) pairs.push(`district=${encodeURIComponent(params.district)}`);
+    if (typeof params.lat === 'number') pairs.push(`lat=${encodeURIComponent(String(params.lat))}`);
+    if (typeof params.lng === 'number') pairs.push(`lng=${encodeURIComponent(String(params.lng))}`);
+    return `${getApiBase()}/mobile-analytics?${pairs.join('&')}`;
   },
 };

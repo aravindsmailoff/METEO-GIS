@@ -26,6 +26,21 @@ import { buildStationsGeoJson } from './RainfallPointLayer';
 
 MapLibreGL.setAccessToken(null);
 
+const METEOGIS_DARK_MAP_STYLE = {
+  version: 8,
+  name: 'MeteoGIS Tactical Base',
+  sources: {},
+  layers: [
+    {
+      id: 'meteogis-ocean-bg',
+      type: 'background',
+      paint: {
+        'background-color': '#020617',
+      },
+    },
+  ],
+};
+
 export interface MapCanvasProps {
   hazards: DerivedHazardEvent[];
   warnings: ValidatedDistrictWarning[];
@@ -170,9 +185,11 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     <View style={styles.root}>
       <MapLibreGL.MapView
         style={styles.map}
+        mapStyle={METEOGIS_DARK_MAP_STYLE}
+        surfaceView={true}
         logoEnabled={false}
         compassEnabled={false}
-        attributionPosition={{ bottom: 8, right: 8 }}
+        attributionEnabled={false}
         onPress={handleEmptyMapTap}
         onDidFailLoadingMap={() => setTileError(true)}
       >

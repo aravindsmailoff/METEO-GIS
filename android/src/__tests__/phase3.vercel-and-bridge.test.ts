@@ -1,5 +1,8 @@
+import { execFileSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
+import vm from 'vm';
 import { describe, expect, it } from 'vitest';
 import {
   API_ROUTES,
@@ -111,5 +114,165 @@ describe('Phase 3 Vercel Production Configuration, Shared Caller Audit & WebView
       targetUri,
     });
     expect(badType.valid).toBe(false);
+  });
+
+  it('compiles a minified Android production JS bundle containing ZERO local development URLs (`10.0.2.2`, `127.0.0.1`, `http://localhost:3000`, `METEOGIS_PROD_API_URL`)', () => {
+    const androidProjectRoot = path.resolve(__dirname, '../..');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meteogis-prod-bundle-'));
+    const bundlePath = path.join(tmpDir, 'index.android.bundle');
+
+    try {
+      execFileSync(
+        'npx',
+        [
+          'react-native',
+          'bundle',
+          '--platform',
+          'android',
+          '--dev',
+          'false',
+          '--minify',
+          'true',
+          '--entry-file',
+          'index.js',
+          '--bundle-output',
+          bundlePath,
+        ],
+        { cwd: androidProjectRoot, stdio: 'pipe', timeout: 40000 }
+      );
+
+      const bundleText = fs.readFileSync(bundlePath, 'utf-8');
+      expect(bundleText).toContain('https://meteo-gis.vercel.app');
+      expect(bundleText).not.toContain('http://10.0.2.2:3000');
+      expect(bundleText).not.toContain('http://127.0.0.1:3000');
+      expect(bundleText).not.toContain('http://localhost:3000');
+      expect(bundleText).not.toContain('10.0.2.2');
+      expect(bundleText).not.toContain('127.0.0.1');
+      expect(bundleText).not.toContain('METEOGIS_PROD_API_URL');
+
+      // Execute the compiled release bundle inside a strict React Native Hermes environment
+      // WITHOUT Node's WHATWG `URL` global so `Libraries/Blob/URL.js` runs identically to Android devices.
+      const capturedExceptions: string[] = [];
+      const dispatchedUrls: string[] = [];
+      const defaultStub = new Proxy(() => false, {
+        get(_t, p) {
+          if (p === 'getConstants') return () => ({ HEIGHT: 24, isRTL: false });
+          if (p === 'enableMicrotasks') return () => false;
+          if (p === 'then') return undefined;
+          return (...args: any[]) => {
+            const cb = args.find((a) => typeof a === 'function');
+            if (cb) cb(null, []);
+            return false;
+          };
+        },
+      });
+
+      const ctx: Record<string, any> = {
+        console,
+        setTimeout,
+        clearTimeout,
+        setInterval,
+        clearInterval,
+        HermesInternal: { hasPromise: () => true, enablePromiseRejectionTracker: () => {} },
+        Promise,
+        queueMicrotask,
+        TextEncoder,
+        TextDecoder,
+        AbortController,
+        nativeLoggingHook: () => {},
+        nativeModuleProxy: new Proxy(
+          {
+            SourceCode: { getConstants: () => ({ scriptURL: 'assets://index.android.bundle' }) },
+            DeviceInfo: {
+              getConstants: () => ({
+                Dimensions: {
+                  windowPhysicalPixels: { width: 1080, height: 2400, scale: 2.75, fontScale: 1, densityDpi: 440 },
+                  screenPhysicalPixels: { width: 1080, height: 2400, scale: 2.75, fontScale: 1, densityDpi: 440 },
+                },
+              }),
+            },
+            PlatformConstants: {
+              getConstants: () => ({
+                isTesting: false,
+                reactNativeVersion: { major: 0, minor: 76, patch: 6 },
+                Version: 34,
+                osVersion: '14',
+                Brand: 'google',
+                Model: 'Pixel 6',
+                uiMode: 'normal',
+              }),
+            },
+            UIManager: {
+              getConstants: () => ({}),
+              getViewManagerConfig: () => ({ Commands: {}, NativeProps: {}, directEventTypes: {}, bubblingEventTypes: {} }),
+              hasViewManagerConfig: () => true,
+              createView: () => {},
+              updateView: () => {},
+              manageChildren: () => {},
+              setChildren: () => {},
+              dispatchViewManagerCommand: () => {},
+              measure: (_t: any, cb: any) => cb(0, 0, 392, 872, 0, 0),
+              measureInWindow: (_t: any, cb: any) => cb(0, 0, 392, 872),
+            },
+            Networking: {
+              addListener: () => {},
+              removeListeners: () => {},
+              abortRequest: () => {},
+              sendRequest: (query: any, cb: any) => {
+                if (query?.url) dispatchedUrls.push(query.url);
+                if (typeof cb === 'function') cb(1);
+              },
+            },
+            Timing: {
+              createTimer: (id: number, dur: number) => {
+                setTimeout(() => {
+                  try {
+                    ctx.__fbBatchedBridge.callFunctionReturnFlushedQueue('JSTimers', 'callTimers', [[id]]);
+                  } catch {}
+                }, Math.min(dur || 1, 20));
+              },
+              deleteTimer: () => {},
+              setSendIdleEvents: () => {},
+            },
+            AppState: {
+              getConstants: () => ({ initialAppState: 'active' }),
+              getCurrentAppState: (cb: any) => cb({ app_state: 'active' }),
+              addListener: () => {},
+              removeListeners: () => {},
+            },
+            AsyncLocalStorage: { multiGet: (_k: any, cb: any) => cb(null, []), multiSet: (_kv: any, cb: any) => cb(null), multiRemove: (_k: any, cb: any) => cb(null) },
+            RNCAsyncStorage: { multiGet: (_k: any, cb: any) => cb(null, []), multiSet: (_kv: any, cb: any) => cb(null), multiRemove: (_k: any, cb: any) => cb(null) },
+            RNCNetInfo: { getCurrentState: () => Promise.resolve({ type: 'wifi', isConnected: true, isInternetReachable: true }), addListener: () => {}, removeListeners: () => {} },
+            MLRNModule: { EventTypes: {}, OfflinePackDownloadState: {}, StyleSource: {}, CameraModes: {}, LineJoin: {}, setAccessToken: () => Promise.resolve(null) },
+            MeteoAppConfig: {
+              PROD_API_URL: 'https://meteo-gis.vercel.app',
+              BUILD_TYPE: 'release',
+              DEBUG: false,
+              getConstants: () => ({ PROD_API_URL: 'https://meteo-gis.vercel.app', BUILD_TYPE: 'release', DEBUG: false }),
+            },
+            ExceptionsManager: {
+              reportException: (data: any) => capturedExceptions.push(String(data?.message)),
+              reportFatalException: (msg: any) => capturedExceptions.push(String(msg)),
+              reportSoftException: () => {},
+            },
+          },
+          { get: (t: any, p: string) => (p in t ? t[p] : defaultStub) }
+        ),
+        __fbBatchedBridgeConfig: { remoteModuleConfig: [] },
+        nativeFabricUIManager: undefined,
+        window: undefined,
+      };
+      ctx.global = ctx;
+      ctx.globalThis = ctx;
+
+      vm.runInNewContext(bundleText, ctx);
+      ctx.__fbBatchedBridge.callFunctionReturnFlushedQueue('AppRegistry', 'runApplication', [
+        'MeteoGIS',
+        { rootTag: 1, initialProps: {} },
+      ]);
+      expect(capturedExceptions).toEqual([]);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

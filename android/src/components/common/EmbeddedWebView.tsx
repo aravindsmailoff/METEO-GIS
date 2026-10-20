@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { WEBVIEW_ORIGIN_WHITELIST } from '../../config/api';
+import { parseHttpUrl, WEBVIEW_ORIGIN_WHITELIST } from '../../config/api';
 import { validateAnalyticsBridgeMessage } from '../../safety/webviewBridge';
 
 export interface EmbeddedWebViewProps {
@@ -30,17 +30,12 @@ export const EmbeddedWebView: React.FC<EmbeddedWebViewProps> = ({
         onError={() => onFailed?.()}
         onHttpError={() => onFailed?.()}
         onMessage={(event) => {
+          const parsedEventUrl = event.nativeEvent.url
+            ? parseHttpUrl(event.nativeEvent.url)
+            : null;
           const result = validateAnalyticsBridgeMessage({
             rawData: event.nativeEvent.data,
-            messageOrigin: event.nativeEvent.url
-              ? (() => {
-                  try {
-                    return new URL(event.nativeEvent.url).origin;
-                  } catch {
-                    return 'invalid://origin';
-                  }
-                })()
-              : undefined,
+            messageOrigin: parsedEventUrl ? parsedEventUrl.origin : 'invalid://origin',
             targetUri: uri,
           });
           if (result.valid && result.type === 'OPEN_RADAR' && onOpenRadarStation) {

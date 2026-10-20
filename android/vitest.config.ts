@@ -2,6 +2,9 @@ import path from 'path';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  define: {
+    __DEV__: true,
+  },
   resolve: {
     alias: [
       { find: /^react-native$/, replacement: path.resolve(__dirname, 'web-rn-shim.ts') },
@@ -10,6 +13,6 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/__tests__/**/*.test.ts'],
-    testTimeout: 15000,
+    testTimeout: 45000,
   },
 });
