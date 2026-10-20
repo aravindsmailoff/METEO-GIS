@@ -8,6 +8,10 @@ on:
       - 'arena/**'
   workflow_dispatch:
 
+concurrency:
+  group: android-ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -19,110 +23,177 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v4
+      - name: Prepare CI step runner with full error/evidence annotations
+        run: |
+          cat << 'EOF' > /tmp/ci_exec.sh
+          #!/usr/bin/env bash
+          set -o pipefail
+          TITLE="$1"
+          shift
+          LOG="/tmp/ci_step_$(date +%s%N).log"
+          "$@" 2>&1 | tee "$LOG"
+          RC=${PIPESTATUS[0]}
+          TAIL_RAW=$(tail -n 65 "$LOG" | tr -d '\r')
+          ENCODED="${TAIL_RAW//'%'/'%25'}"
+          ENCODED="${ENCODED//$'\n'/'%0A'}"
+          if [ "$RC" -ne 0 ]; then
+            echo "::error title=${TITLE} (exit ${RC})::${ENCODED}"
+            exit "$RC"
+          fi
+          SUMMARY_TAIL=$(tail -n 18 "$LOG" | tr -d '\r')
+          SUM_ENC="${SUMMARY_TAIL//'%'/'%25'}"
+          SUM_ENC="${SUM_ENC//$'\n'/'%0A'}"
+          echo "::notice title=${TITLE} (exit 0)::${SUM_ENC}"
+          EOF
+          chmod +x /tmp/ci_exec.sh
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
             android/package-lock.json
 
       - name: Set up JDK 17 (Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK, Build-Tools, NDK & CMake
-        uses: android-actions/setup-android@v3
-
-      - name: Install required Android SDK platforms, Build-Tools 35.0.0, NDK 26.1.10909125 & CMake 3.22.1
+      - name: Bootstrap & install Android SDK 35/34, Build-Tools 35.0.0, NDK 26.1.10909125 & CMake 3.22.1
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "platforms;android-34" \
-            "build-tools;35.0.0" \
-            "ndk;26.1.10909125" \
-            "cmake;3.22.1"
+          /tmp/ci_exec.sh "Android SDK Setup" bash -c '
+            set -euo pipefail
+            if [ -n "${ANDROID_HOME:-}" ] && [ -x "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" ]; then
+              SDK_ROOT="${ANDROID_HOME}"
+            elif [ -x "/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager" ]; then
+              SDK_ROOT="/usr/local/lib/android/sdk"
+            else
+              SDK_ROOT="${HOME}/android-sdk"
+              if [ ! -x "${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" ]; then
+                echo "Installing official Google Android Command-Line Tools into ${SDK_ROOT}..."
+                if ! command -v unzip >/dev/null 2>&1; then
+                  sudo apt-get update -y && sudo apt-get install -y unzip curl
+                fi
+                mkdir -p "${SDK_ROOT}/cmdline-tools"
+                curl -fsSL "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" -o /tmp/cmdtools.zip
+                unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools_unpack
+                rm -rf "${SDK_ROOT}/cmdline-tools/latest"
+                mv /tmp/cmdtools_unpack/cmdline-tools "${SDK_ROOT}/cmdline-tools/latest"
+                rm -rf /tmp/cmdtools.zip /tmp/cmdtools_unpack
+              fi
+            fi
+
+            export ANDROID_HOME="${SDK_ROOT}"
+            export ANDROID_SDK_ROOT="${SDK_ROOT}"
+            export PATH="${SDK_ROOT}/cmdline-tools/latest/bin:${SDK_ROOT}/platform-tools:${PATH}"
+
+            echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
+            echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
+            echo "${SDK_ROOT}/cmdline-tools/latest/bin" >> "${GITHUB_PATH}"
+            echo "${SDK_ROOT}/platform-tools" >> "${GITHUB_PATH}"
+
+            yes | sdkmanager --sdk_root="${SDK_ROOT}" --licenses >/dev/null || true
+            sdkmanager --sdk_root="${SDK_ROOT}" --install \
+              "platform-tools" \
+              "platforms;android-35" \
+              "platforms;android-34" \
+              "build-tools;35.0.0" \
+              "ndk;26.1.10909125" \
+              "cmake;3.22.1"
+
+            printf "sdk.dir=%s\n" "${SDK_ROOT}" > android/android/local.properties
+            java -version
+            sdkmanager --sdk_root="${SDK_ROOT}" --list_installed | head -n 30
+          '
 
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
       - name: 1. Install web & Android npm dependencies cleanly (npm ci)
-        run: |
-          npm ci
-          cd android && npm ci
+        run: /tmp/ci_exec.sh "Step 1 - npm ci" bash -c "set -euo pipefail && npm ci && cd android && npm ci"
 
       - name: 2. Run Android TypeScript check
         working-directory: android
-        run: npm run typecheck
+        run: /tmp/ci_exec.sh "Step 2 - Android tsc" npm run typecheck
 
       - name: 3. Run Android automated safety & integrity test suite
         working-directory: android
-        run: npm test
+        run: /tmp/ci_exec.sh "Step 3 - Android Safety Tests" npm test
 
       - name: 4. Run Web TypeScript check
-        run: npx tsc --noEmit
+        run: /tmp/ci_exec.sh "Step 4 - Web tsc" npx tsc --noEmit
 
       - name: 5. Build React Native Android JS bundle
         working-directory: android
         run: |
-          mkdir -p /tmp/meteogis-rn-bundle/assets
-          npx react-native bundle \
-            --platform android \
-            --dev false \
-            --entry-file index.js \
-            --bundle-output /tmp/meteogis-rn-bundle/index.android.bundle \
-            --assets-dest /tmp/meteogis-rn-bundle/assets
-          ls -lh /tmp/meteogis-rn-bundle/index.android.bundle
+          /tmp/ci_exec.sh "Step 5 - RN Android Bundle" bash -c '
+            set -euo pipefail
+            mkdir -p /tmp/meteogis-rn-bundle/assets
+            npx react-native bundle \
+              --platform android \
+              --dev false \
+              --entry-file index.js \
+              --bundle-output /tmp/meteogis-rn-bundle/index.android.bundle \
+              --assets-dest /tmp/meteogis-rn-bundle/assets
+            ls -lh /tmp/meteogis-rn-bundle/index.android.bundle
+          '
 
       - name: 6. Verify Gradle wrapper & version (`./gradlew --version`)
         working-directory: android/android
-        run: ./gradlew --version --no-daemon
+        run: /tmp/ci_exec.sh "Step 6 - Gradle Version" ./gradlew --version --no-daemon
 
       - name: 7. Assemble native Android Debug APK (`./gradlew assembleDebug`)
         working-directory: android/android
         run: |
-          ./gradlew assembleDebug --no-daemon --stacktrace
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          /tmp/ci_exec.sh "Step 7 - assembleDebug" bash -c '
+            set -euo pipefail
+            ./gradlew assembleDebug --no-daemon --stacktrace
+            ls -lh app/build/outputs/apk/debug/app-debug.apk
+            sha256sum app/build/outputs/apk/debug/app-debug.apk
+          '
 
       - name: 8. Directly verify release API configuration (`./gradlew verifyReleaseApiConfig` positive & negative checks)
         working-directory: android/android
         run: |
-          # Must PASS with default production URL and explicit HTTPS production URL
-          ./gradlew verifyReleaseApiConfig --no-daemon
-          ./gradlew verifyReleaseApiConfig -PPROD_API_URL=https://meteo-gis.vercel.app --no-daemon
+          /tmp/ci_exec.sh "Step 8 - verifyReleaseApiConfig" bash -c '
+            set -euo pipefail
+            ./gradlew verifyReleaseApiConfig --no-daemon
+            ./gradlew verifyReleaseApiConfig -PPROD_API_URL=https://meteo-gis.vercel.app --no-daemon
 
-          # Must FAIL when given non-HTTPS, emulator, localhost, loopback, or placeholder URLs
-          for BAD_URL in \
-            "http://meteo-gis.vercel.app" \
-            "http://10.0.2.2:3000" \
-            "https://localhost:3000" \
-            "https://127.0.0.1:3000" \
-            "https://api.example.com"
-          do
-            if ./gradlew verifyReleaseApiConfig "-PPROD_API_URL=${BAD_URL}" --no-daemon >/dev/null 2>&1; then
-              echo "ERROR: verifyReleaseApiConfig unexpectedly accepted unsafe URL: ${BAD_URL}"
-              exit 1
-            else
-              echo "Confirmed blocked unsafe release URL: ${BAD_URL}"
-            fi
-          done
+            for BAD_URL in \
+              "http://meteo-gis.vercel.app" \
+              "http://10.0.2.2:3000" \
+              "https://localhost:3000" \
+              "https://127.0.0.1:3000" \
+              "https://api.example.com"
+            do
+              if ./gradlew verifyReleaseApiConfig "-PPROD_API_URL=${BAD_URL}" --no-daemon >/dev/null 2>&1; then
+                echo "ERROR: verifyReleaseApiConfig unexpectedly accepted unsafe URL: ${BAD_URL}"
+                exit 1
+              else
+                echo "Confirmed blocked unsafe release URL: ${BAD_URL}"
+              fi
+            done
+          '
 
       - name: 9. Assemble native Android Release APK (`./gradlew assembleRelease -PPROD_API_URL=https://meteo-gis.vercel.app`)
         working-directory: android/android
         run: |
-          ./gradlew assembleRelease -PPROD_API_URL=https://meteo-gis.vercel.app --no-daemon --stacktrace
-          ls -lh app/build/outputs/apk/release/
+          /tmp/ci_exec.sh "Step 9 - assembleRelease" bash -c '
+            set -euo pipefail
+            ./gradlew assembleRelease -PPROD_API_URL=https://meteo-gis.vercel.app --no-daemon --stacktrace
+            ls -lh app/build/outputs/apk/release/
+            sha256sum app/build/outputs/apk/release/*.apk
+          '
 
       - name: Non-destructive live `https://meteo-gis.vercel.app` contract check (zero SOS or emergency calls)
         run: |
-          node -e '
+          /tmp/ci_exec.sh "Live Vercel Non-Destructive Contract Check" node -e '
             (async () => {
               const base = "https://meteo-gis.vercel.app";
               const getCheck = async (path) => {
