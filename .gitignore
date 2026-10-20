@@ -9,6 +9,16 @@
 build
 dist
 
+# Native Android artifacts, local SDK config & signing keys (never commit secrets/keystores)
+*.apk
+*.aab
+*.keystore
+*.jks
+local.properties
+!android/android/gradle/wrapper/gradle-wrapper.jar
+!android/android/gradlew
+!android/android/gradlew.bat
+
 # Environment variables & Tokens
 .env
 .env*.local

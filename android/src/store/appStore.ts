@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
-import { setCustomApiBase } from '../config/api';
+import { IS_DEV_RUNTIME, setCustomApiBase } from '../config/api';
 import {
   ActiveRouteOverlay,
   BaseMapId,
@@ -104,7 +104,7 @@ interface AppState {
   setActiveRouteOverlay: (route: ActiveRouteOverlay | null) => void;
 
   setNotificationsEnabled: (enabled: boolean) => Promise<void>;
-  updateCustomApiUrl: (url: string) => Promise<void>;
+  updateCustomApiUrl: (url: string) => Promise<{ ok: boolean; error?: string }>;
   setSimulateOfflineMode: (offline: boolean) => void;
   setUseReferenceFallbackWhenUpstreamDown: (enabled: boolean) => void;
   triggerGlobalRefresh: () => void;
@@ -172,7 +172,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   notificationsEnabled: false,
   customApiUrl: '',
   simulateOfflineMode: false,
-  useReferenceFallbackWhenUpstreamDown: true,
+  useReferenceFallbackWhenUpstreamDown: false,
   refreshNonce: 1,
 
   hydratePreferences: async () => {
@@ -180,8 +180,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       const raw = await AsyncStorage.getItem(PREFS_STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
+      let validatedCustomUrl = '';
       if (parsed.customApiUrl) {
-        setCustomApiBase(parsed.customApiUrl);
+        const res = setCustomApiBase(parsed.customApiUrl);
+        if (res?.valid) {
+          validatedCustomUrl = res.normalizedUrl;
+        }
       }
       const territory = parsed.defaultTerritory || 'All India';
       const stateMeta = QUICK_STATES.find((s) => s.name === territory) || QUICK_STATES[0];
@@ -190,7 +194,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         defaultTerritory: territory,
         selectedState: territory,
         notificationsEnabled: Boolean(parsed.notificationsEnabled),
-        customApiUrl: parsed.customApiUrl || '',
+        customApiUrl: validatedCustomUrl,
+        useReferenceFallbackWhenUpstreamDown: false,
         cameraCommand: {
           lat: stateMeta.lat,
           lng: stateMeta.lng,
@@ -406,9 +411,20 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateCustomApiUrl: async (url: string) => {
     const cleaned = url.trim().replace(/\/+$/, '');
-    setCustomApiBase(cleaned || null);
-    set((prev) => ({ customApiUrl: cleaned, refreshNonce: prev.refreshNonce + 1 }));
-    await savePrefsSnapshot({ customApiUrl: cleaned });
+    if (!cleaned) {
+      setCustomApiBase(null);
+      set((prev) => ({ customApiUrl: '', refreshNonce: prev.refreshNonce + 1 }));
+      await savePrefsSnapshot({ customApiUrl: '' });
+      return { ok: true };
+    }
+    const validation = setCustomApiBase(cleaned);
+    if (validation && !validation.valid) {
+      return { ok: false, error: validation.error };
+    }
+    const normalized = validation?.normalizedUrl || cleaned;
+    set((prev) => ({ customApiUrl: normalized, refreshNonce: prev.refreshNonce + 1 }));
+    await savePrefsSnapshot({ customApiUrl: normalized });
+    return { ok: true };
   },
 
   setSimulateOfflineMode: (offline: boolean) =>
@@ -416,7 +432,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setUseReferenceFallbackWhenUpstreamDown: (enabled: boolean) =>
     set((prev) => ({
-      useReferenceFallbackWhenUpstreamDown: enabled,
+      // Sample data strictly blocked in non-dev builds
+      useReferenceFallbackWhenUpstreamDown: IS_DEV_RUNTIME ? Boolean(enabled) : false,
       refreshNonce: prev.refreshNonce + 1,
     })),
 

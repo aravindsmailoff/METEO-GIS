@@ -1,6 +1,8 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { WEBVIEW_ORIGIN_WHITELIST } from '../../config/api';
+import { validateAnalyticsBridgeMessage } from '../../safety/webviewBridge';
 
 export interface EmbeddedWebViewProps {
   uri: string;
@@ -23,17 +25,26 @@ export const EmbeddedWebView: React.FC<EmbeddedWebViewProps> = ({
         source={{ uri }}
         style={styles.webview}
         nestedScrollEnabled
+        originWhitelist={WEBVIEW_ORIGIN_WHITELIST}
         onLoadEnd={() => onLoaded?.()}
         onError={() => onFailed?.()}
         onHttpError={() => onFailed?.()}
         onMessage={(event) => {
-          try {
-            const parsed = JSON.parse(event.nativeEvent.data);
-            if (parsed?.type === 'OPEN_RADAR' && parsed.stationCode && onOpenRadarStation) {
-              onOpenRadarStation(parsed.stationCode);
-            }
-          } catch {
-            // Ignore non-JSON postMessages
+          const result = validateAnalyticsBridgeMessage({
+            rawData: event.nativeEvent.data,
+            messageOrigin: event.nativeEvent.url
+              ? (() => {
+                  try {
+                    return new URL(event.nativeEvent.url).origin;
+                  } catch {
+                    return 'invalid://origin';
+                  }
+                })()
+              : undefined,
+            targetUri: uri,
+          });
+          if (result.valid && result.type === 'OPEN_RADAR' && onOpenRadarStation) {
+            onOpenRadarStation(result.stationCode);
           }
         }}
       />

@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { validateAnalyticsBridgeMessage } from '../../safety/webviewBridge';
 import type { EmbeddedWebViewProps } from './EmbeddedWebView';
 
 export const EmbeddedWebView: React.FC<EmbeddedWebViewProps> = ({
@@ -11,18 +12,19 @@ export const EmbeddedWebView: React.FC<EmbeddedWebViewProps> = ({
 }) => {
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
-      try {
-        const parsed = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
-        if (parsed?.type === 'OPEN_RADAR' && parsed.stationCode && onOpenRadarStation) {
-          onOpenRadarStation(parsed.stationCode);
-        }
-      } catch {
-        // Ignore unrelated window messages
+      const result = validateAnalyticsBridgeMessage({
+        rawData: ev.data,
+        messageOrigin: ev.origin,
+        targetUri: uri,
+        currentWindowOrigin: typeof window !== 'undefined' ? window.location.origin : undefined,
+      });
+      if (result.valid && result.type === 'OPEN_RADAR' && onOpenRadarStation) {
+        onOpenRadarStation(result.stationCode);
       }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [onOpenRadarStation]);
+  }, [onOpenRadarStation, uri]);
 
   return (
     <View style={[styles.container, { height }]}>

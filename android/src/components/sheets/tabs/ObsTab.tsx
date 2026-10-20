@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import axios from 'axios';
-import { API_ROUTES } from '../../../config/api';
+import {
+  executeRiskPrediction,
+  VerifiedRiskPrediction,
+} from '../../../safety/riskPrediction';
 import { MONITORED_DWR_NETWORK } from '../../../data/indiaGeoCatalog';
 import { useAppStore } from '../../../store/appStore';
 import {
@@ -35,34 +37,24 @@ export const ObsTab: React.FC<ObsTabProps> = ({
   const openRadarModal = useAppStore((s) => s.openRadarModal);
 
   const [predicting, setPredicting] = useState(false);
-  const [mlResult, setMlResult] = useState<any | null>(null);
+  const [mlResult, setMlResult] = useState<VerifiedRiskPrediction | null>(null);
+  const [mlError, setMlError] = useState<string | null>(null);
 
   const runMlRiskInference = async () => {
     setPredicting(true);
+    setMlError(null);
     try {
-      const targetLat = selectedEvidence?.lat ?? 10.3797;
-      const targetLng = selectedEvidence?.lng ?? 78.8208;
-      const res = await axios.post(
-        API_ROUTES.riskPredict(),
-        {
-          district: selectedEvidence?.district || 'Pudukkottai',
-          latitude: targetLat,
-          longitude: targetLng,
-          features: {
-            rainfall_1h_mm: selectedEvidence?.rainfall1hMm ?? 24,
-            rainfall_24h_mm: selectedEvidence?.rainfall24hMm ?? 118,
-            humidity_pct: selectedEvidence?.humidityPercent ?? 85,
-          },
-        },
-        { timeout: 6000 }
-      );
-      setMlResult(res.data);
-    } catch {
-      setMlResult({
-        risk_level: 'MODERATE-HIGH',
-        probability: 0.72,
-        summary: 'Local rainfall & soil saturation threshold elevated.',
+      const outcome = await executeRiskPrediction({
+        evidence: selectedEvidence,
+        stations,
+        timeoutMs: 6000,
       });
+      if (!outcome.ok) {
+        setMlResult(null);
+        setMlError(outcome.error);
+        return;
+      }
+      setMlResult(outcome.data);
     } finally {
       setPredicting(false);
     }
@@ -114,23 +106,21 @@ export const ObsTab: React.FC<ObsTabProps> = ({
             </Text>
           )}
         </Pressable>
+
+        {mlError && <ErrorRetry message={mlError} onRetry={runMlRiskInference} />}
+
         {mlResult && (
           <View style={styles.mlResultBox}>
             <Text style={styles.mlResultTitle}>
-              Risk Tier: {mlResult.risk_level || mlResult.tier || mlResult.severity || 'HIGH'} ·{' '}
-              Score:{' '}
-              {typeof mlResult.probability === 'number'
-                ? `${Math.round(mlResult.probability * 100)}%`
-                : mlResult.risk_score
-                  ? `${Math.round(Number(mlResult.risk_score) * 100)}%`
-                  : '74%'}
+              Risk Tier: {mlResult.riskLevel} · Landslide Probability:{' '}
+              {mlResult.probabilityPercent.toFixed(1)}%
             </Text>
-            <Text style={styles.mlResultSub}>
-              {mlResult.recommendation ||
-                mlResult.explanation ||
-                mlResult.summary ||
-                'Computed via Next.js authoritative ML risk engine.'}
+            <Text style={styles.mlResultMeta}>
+              Primary Trigger: {mlResult.topTrigger} · Evaluated Rain (1h / 24h):{' '}
+              {mlResult.featuresEvaluated.rainfall_1h ?? '—'} mm /{' '}
+              {mlResult.featuresEvaluated.rainfall_24h ?? '—'} mm
             </Text>
+            <Text style={styles.mlResultSub}>{mlResult.recommendedAction}</Text>
           </View>
         )}
       </View>
@@ -186,7 +176,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f172a',
     borderWidth: 1,
     borderColor: '#1e293b',
-    gap: 8,
+    gap: 10,
   },
   radarChips: {
     flexDirection: 'row',
@@ -204,8 +194,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   radarChipActive: {
-    backgroundColor: 'rgba(6, 182, 212, 0.2)',
-    borderColor: '#22d3ee',
+    backgroundColor: 'rgba(14, 165, 233, 0.22)',
+    borderColor: '#38bdf8',
   },
   radarChipText: {
     color: '#cbd5e1',
@@ -213,37 +203,43 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   radarChipTextActive: {
-    color: '#ecfeff',
+    color: '#f8fafc',
   },
   mlBtn: {
     minHeight: 48,
     borderRadius: 10,
-    backgroundColor: '#0284c7',
+    backgroundColor: '#7c3aed',
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
   },
   mlBtnText: {
     color: '#ffffff',
-    fontSize: 12.5,
+    fontSize: 12,
     fontWeight: '800',
   },
   mlResultBox: {
     padding: 10,
-    borderRadius: 8,
+    borderRadius: 10,
     backgroundColor: '#020617',
     borderWidth: 1,
-    borderColor: '#38bdf8',
+    borderColor: '#8b5cf6',
     gap: 4,
   },
   mlResultTitle: {
-    color: '#7dd3fc',
+    color: '#ddd6fe',
     fontSize: 12.5,
     fontWeight: '800',
+  },
+  mlResultMeta: {
+    color: '#a78bfa',
+    fontSize: 11,
+    fontWeight: '700',
   },
   mlResultSub: {
     color: '#cbd5e1',
     fontSize: 11.5,
+    lineHeight: 16,
   },
   stnCard: {
     padding: 12,
@@ -256,7 +252,7 @@ const styles = StyleSheet.create({
   stnTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 8,
   },
   stnName: {
     color: '#f8fafc',
@@ -264,12 +260,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   stnMeta: {
-    color: '#64748b',
+    color: '#94a3b8',
     fontSize: 11,
-    marginTop: 2,
+    marginTop: 1,
   },
   stnStatus: {
-    color: '#34d399',
+    color: '#6ee7b7',
     fontSize: 10.5,
     fontWeight: '800',
   },

@@ -279,15 +279,23 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
           />
         </MapLibreGL.ShapeSource>
 
-        {/* Active Safe / Emergency Route Polyline */}
+        {/* Active Safe / Emergency Route Polyline (Amber dashed when Road-Closure Safety Unverified) */}
         {routeGeo && (
           <MapLibreGL.ShapeSource id="active-route-src" shape={routeGeo}>
             <MapLibreGL.LineLayer
               id="active-route-line"
               style={{
-                lineColor: activeRouteOverlay?.mode === 'emergency' ? '#38bdf8' : '#10b981',
+                lineColor:
+                  activeRouteOverlay?.closureVerification === 'closure_unverified'
+                    ? '#f59e0b'
+                    : activeRouteOverlay?.mode === 'emergency'
+                      ? '#38bdf8'
+                      : '#10b981',
                 lineWidth: 4.5,
                 lineOpacity: 0.92,
+                ...(activeRouteOverlay?.closureVerification === 'closure_unverified'
+                  ? { lineDasharray: [2.2, 1.4] }
+                  : {}),
               }}
             />
           </MapLibreGL.ShapeSource>

@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import axios from 'axios';
-import { API_ROUTES } from '../config/api';
+import { API_ROUTES, IS_DEV_RUNTIME } from '../config/api';
 import { buildReferenceWarningsPayload } from '../data/indiaGeoCatalog';
+import { resolveFeedOutcome } from '../safety/feedIntegrity';
 import { useAppStore } from '../store/appStore';
 import { DataState, WarningsPayload } from '../types/meteo';
 import { FEED_TTL, isCacheStale, readCache, writeCache } from '../utils/cache';
@@ -12,6 +14,7 @@ const EMPTY_WARNINGS: WarningsPayload = {
   warnings: [],
   activeAlertsCount: 0,
   totalDistricts: 0,
+  isReferenceSnapshot: false,
 };
 
 export function useWarnings() {
@@ -25,11 +28,20 @@ export function useWarnings() {
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const abortRef = useRef<AbortController | null>(null);
+  const failureStreakRef = useRef<number>(0);
+
   const cacheKey = `warnings:${selectedState}`;
 
   const load = useCallback(
     async (forceFresh = false) => {
-      const cached = await readCache<WarningsPayload>(cacheKey);
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      const rawCached = await readCache<WarningsPayload>(cacheKey);
+      const cached =
+        rawCached && !rawCached.data?.isReferenceSnapshot ? rawCached : null;
 
       if (!isOnline) {
         if (cached) {
@@ -59,42 +71,55 @@ export function useWarnings() {
         const res = await axios.get<WarningsPayload>(API_ROUTES.warnings(), {
           params,
           timeout: 8000,
+          signal: controller.signal,
         });
 
         const payload = res.data;
-        const hasRealWarnings =
-          payload && payload.warnings && Array.isArray(payload.warnings) && payload.warnings.length > 0;
+        const hasLiveItems = Boolean(
+          payload && Array.isArray(payload.warnings) && payload.warnings.length > 0
+        );
 
-        if (hasRealWarnings) {
-          const saved = await writeCache(cacheKey, payload, 'api/live/warnings', FEED_TTL.warnings);
+        const outcome = resolveFeedOutcome<WarningsPayload>({
+          upstreamPayload: payload,
+          hasLiveItems,
+          cached,
+          emptyPayload: EMPTY_WARNINGS,
+          buildSamplePayload: () => buildReferenceWarningsPayload(selectedState),
+          isDev: IS_DEV_RUNTIME,
+          qaSampleOptIn: useReferenceFallback,
+        });
+
+        failureStreakRef.current = outcome.dataState === 'error' ? failureStreakRef.current + 1 : 0;
+
+        if (outcome.shouldPersistToCache) {
+          const saved = await writeCache(
+            cacheKey,
+            outcome.payload,
+            'api/live/warnings',
+            FEED_TTL.warnings
+          );
           setData(saved.data);
           setFetchedAt(saved.fetchedAt);
-          setErrorMessage(null);
-          setDataState('success');
-          return;
+        } else {
+          setData(outcome.payload);
+          setFetchedAt(outcome.dataState === 'stale' && cached ? cached.fetchedAt : Date.now());
         }
 
-        if (useReferenceFallback) {
-          const fallback = buildReferenceWarningsPayload(selectedState);
-          const saved = await writeCache(cacheKey, fallback, 'api/live/warnings', FEED_TTL.warnings);
-          setData(saved.data);
-          setFetchedAt(saved.fetchedAt);
-          setErrorMessage(null);
-          setDataState(fallback.warnings.length === 0 ? 'empty' : 'success');
-          return;
-        }
-
-        if (cached) {
-          setData(cached.data);
-          setFetchedAt(cached.fetchedAt);
-          setDataState('stale');
-          return;
-        }
-
-        setData(EMPTY_WARNINGS);
-        setFetchedAt(Date.now());
-        setDataState('empty');
+        setErrorMessage(outcome.errorMessage);
+        setDataState(outcome.dataState);
       } catch (err: any) {
+        if (controller.signal.aborted) return;
+        failureStreakRef.current += 1;
+
+        if (IS_DEV_RUNTIME && useReferenceFallback) {
+          const sample = { ...buildReferenceWarningsPayload(selectedState), isReferenceSnapshot: true };
+          setData(sample);
+          setFetchedAt(Date.now());
+          setErrorMessage(null);
+          setDataState('sample');
+          return;
+        }
+
         if (cached) {
           setData(cached.data);
           setFetchedAt(cached.fetchedAt);
@@ -109,9 +134,30 @@ export function useWarnings() {
   );
 
   useEffect(() => {
-    load(false);
-    const pollId = setInterval(() => load(false), 60000); // Spec Section 7: 60s interval
-    return () => clearInterval(pollId);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const scheduleNext = () => {
+      const backoffFactor = Math.min(4, Math.pow(2, failureStreakRef.current));
+      const delayMs = 60000 * backoffFactor;
+      timer = setTimeout(async () => {
+        if (cancelled) return;
+        if (!AppState.currentState || AppState.currentState === 'active') {
+          await load(false);
+        }
+        if (!cancelled) scheduleNext();
+      }, delayMs);
+    };
+
+    load(false).finally(() => {
+      if (!cancelled) scheduleNext();
+    });
+
+    return () => {
+      cancelled = true;
+      abortRef.current?.abort();
+      if (timer) clearTimeout(timer);
+    };
   }, [load, refreshNonce]);
 
   useEffect(() => {

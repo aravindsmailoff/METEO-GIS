@@ -1,69 +1,73 @@
-# MeteoGIS Android App (`android/`)
+# METEO-GIS Android Application (`React Native 0.76.6 + MapLibre`)
 
-Production-structured **React Native + MapLibre** Android application for **MeteoGIS — Operational Meteorological & Flood Intelligence (India)**, connected directly to the existing single-port Next.js backend gateway (`http://10.0.2.2:3000/api/*`).
-
-> **Scope isolation:** The existing web application in `app/`, `components/`, and `backend/` remains untouched except for the dedicated fullscreen `app/mobile-analytics/page.tsx` embed page used by the mobile `WebView` Analytics view.
+Isolated native Android companion app for the deployed **METEO-GIS** platform (**`https://meteo-gis.vercel.app`**), built inside `/android` without altering the existing web dashboard or backend code.
 
 ---
 
-## Quick Start (Android Studio Emulator or Physical Android Device)
+## 1. Verified Compatibility Matrix & Keystore Hygiene
 
-### 1. Start the Backend Gateway (Root Folder)
-```bash
-pnpm install
-pnpm dev
-# Runs Next.js API gateway on http://localhost:3000
-```
-
-### 2. Install Mobile Dependencies & Start Metro (`android/`)
-```bash
-cd android
-npm install
-npm start
-```
-
-### 3. Run in Android Studio / Build APK
-- Open **`android/android`** inside **Android Studio** -> wait for Gradle Sync -> press **Run ▶** on any API 24+ emulator (`10.0.2.2:3000` resolves automatically to host `:3000`), **or** run:
-```bash
-cd android
-npm run android
-```
-- **Physical Android Phone over USB:**
-```bash
-adb reverse tcp:3000 tcp:3000
-```
-  *(Or enter your PC's LAN URL such as `http://192.168.1.10:3000` inside **Settings -> API Gateway Config** without modifying code.)*
-
-### 4. Browser Simulator Preview (Optional Instant QA)
-```bash
-cd android
-npm run preview
-# Serves the interactive Pixel 8 Pro / 360dp Small Android / 150% Font Scale harness on port 5173
-```
+| Layer | Verified Version / Configuration |
+|---|---|
+| **React Native / Hermes** | `0.76.6` (`hermesEnabled=true`, `newArchEnabled=false`, `OpenSourceMergedSoMapping`) |
+| **Android Gradle Plugin (AGP)** | `8.6.0` (via `@react-native/gradle-plugin`) |
+| **Gradle Wrapper** | `8.10.2` (`android/android/gradle/wrapper/gradle-wrapper.properties` + `gradle-wrapper.jar`) |
+| **Kotlin / Java Target** | Kotlin `1.9.24`, JDK `17` (`JavaVersion.VERSION_17`) |
+| **Android SDK / NDK / CMake** | `compileSdk = 35`, `targetSdk = 34`, `minSdk = 24`, `buildToolsVersion = "35.0.0"`, `ndkVersion = "26.1.10909125"`, `cmake = "3.22.1"` |
+| **Signing Strategy (Zero Committed Keys)** | No `.keystore` or `.jks` files are checked into Git. `assembleDebug` uses Android Gradle Plugin's auto-generated machine-local `~/.android/debug.keystore`. `assembleRelease` signs with `RELEASE_STORE_FILE` / `RELEASE_STORE_PASSWORD` / `RELEASE_KEY_ALIAS` / `RELEASE_KEY_PASSWORD` when supplied, or outputs reproducible unsigned `app-release-unsigned.apk` when omitted. |
 
 ---
 
-## Verified API Contract (All via Single Port `:3000`)
+## 2. Shared Backend Configuration & Cleartext Security (`src/config/api.ts`)
 
-| Feature | Endpoint | Component / Hook |
-|---|---|---|
-| Live hazard events & pluvial zones | `GET /api/live/hazards` | `useHazards.ts` (30s poll, 5m TTL cache) |
-| 5-day district warnings | `GET /api/live/warnings` | `useWarnings.ts` (60s poll, 15m TTL cache) |
-| Surface AWS stations & 24h rain | `GET /api/live/stations`, `GET /api/live/rainfall` | `useStations.ts` (120s poll, 2m TTL cache) |
-| ML multi-hazard risk prediction | `POST /api/risk/predict` | `ObsTab.tsx` |
-| Village isolation corridors | `GET /api/isolation` | `ImpactTab.tsx` |
-| Flood-free & NDRF routing | `POST /api/routing/safe-route`, `POST /api/routing/emergency-route` | `ImpactTab.tsx` + `MapCanvas` polyline |
-| Emergency SOS & field reports | `POST /api/sos`, `POST /api/sos/cancel`, `POST /api/citizen/report` | `ImpactTab.tsx` |
-| Provider telemetry & data audit | `GET /api/telemetry`, `GET /api/live/audit`, `GET /api/system/data-status` | `DataTab.tsx`, `SettingsScreen.tsx` |
-| ISRO Bhuvan slippy tiles | `GET /api/bhuvan/wms?z={z}&x={x}&y={y}&layers=...` | `MapCanvas.tsx` |
-| DWR Radar & INSAT-3DR streams | `GET /api/imd/imagery?type=radar...` / `?type=satellite...` | `ImdRadarModal.tsx`, `InsatSatelliteModal.tsx` |
-| Embedded Telemetry Analytics | `GET /mobile-analytics` | `AnalyticsTab.tsx` (`WebView` + 3s SVG fallback) |
+All mobile network requests and embedded analytics WebViews route through `src/config/api.ts`:
+
+- **Production Default (Debug & Release APKs):** `https://meteo-gis.vercel.app` (`PRODUCTION_API_URL`, bridged at build time via `PROD_API_URL` -> `BuildConfig.PROD_API_URL` -> `NativeModules.MeteoAppConfig.PROD_API_URL`)
+- **Intentional Local Emulator Dev (Opt-In Only):** `http://10.0.2.2:3000` (`LOCAL_DEV_API_URL`, active only when `USE_LOCAL_DEV_API=true` in development or explicitly selected in **Settings -> Emulator :3000**)
+- **Physical Device Local Dev via USB:** `adb reverse tcp:3000 tcp:3000` + **Settings -> ADB :3000** (`http://127.0.0.1:3000`)
+- **Build-Type Network Security Configs:**
+  - **Release (`app/src/main/res/xml/network_security_config.xml`):** `<base-config cleartextTrafficPermitted="false" />` across all hosts with zero cleartext exceptions.
+  - **Debug Overlay (`app/src/debug/res/xml/network_security_config.xml`):** permits cleartext HTTP solely on loopback development hosts (`10.0.2.2`, `127.0.0.1`, `localhost`).
+  - **Compile-Time Guard (`verifyReleaseApiConfig`):** rejects empty, non-HTTPS, `localhost`, `127.0.0.1`, `10.0.2.2`, `0.0.0.0`, `::1`, or placeholder URLs before any release APK/AAB task executes.
 
 ---
 
-## Non-Overlapping Spatial Rules Enforced
+## 3. Reproducible Build & Verification Commands
 
-1. **In-Flow Top Chrome (`TopHazardStrip`):** Search bar, `LIVE / HIST` mode toggle, `☰ / ✕` drawer button, and expandable hazard countdown strip occupy dedicated vertical space above the map and **auto-collapse when `BottomSheet === 'full'`**.
-2. **Reserved Collapsed Sheet Clearance (`marginBottom: 56dp`):** The map viewport ends above the `56dp` collapsed sheet handle bar—preventing any overlap with map attribution, zoom buttons, or the bottom-left `Rainfall (24h IMD)` legend.
-3. **Half-Sheet Camera Padding (`paddingBottom: HALF_SHEET_HEIGHT + 16`):** Tapping any marker flies the camera with bottom padding equal to the open half-sheet height so selected districts always sit centered in the visible upper map window.
-4. **Minimum `48dp` Touch Targets & Hardware Back Stack:** Every interactive control meets Android `48dp` accessibility sizing, and hardware Back follows `Modal -> LayerDrawer -> Expanded Top Strip -> Sheet (Full -> Half -> Collapsed) -> Navigation`.
+```bash
+# 1. Install web & Android dependencies cleanly
+npm ci
+cd android && npm ci
+
+# 2. Run Android & Web TypeScript checks + Safety Test Suite
+npm run typecheck
+npm test
+cd .. && npx tsc --noEmit
+
+# 3. Verify React Native Android production JS bundle
+cd android
+npx react-native bundle \
+  --platform android \
+  --dev false \
+  --entry-file index.js \
+  --bundle-output /tmp/index.android.release.bundle
+
+# 4. Run Gradle wrapper, Debug APK, API Guard check, and Release APK
+cd android
+./gradlew --version
+./gradlew assembleDebug
+./gradlew verifyReleaseApiConfig
+./gradlew assembleRelease -PPROD_API_URL=https://meteo-gis.vercel.app
+```
+
+Automated CI runs every command above on GitHub Actions (`.github/workflows/android-build.yml`) and publishes both `meteo-gis-android-debug-apk` (`app-debug.apk`) and `meteo-gis-android-release-apk` (`app-release-unsigned.apk`) build artifacts.
+
+---
+
+## 4. Safety Verification & Vercel Standalone Behavior
+
+| Feature / Endpoint | Verification & Degraded-Mode Behavior |
+|---|---|
+| **Safe & Emergency Routing (`/api/routing/safe-route`, `/emergency-route` + `/api/roads/incidents`)** | Rejects `<5`-vertex straight lines, malformed coordinates, missing distance/time metrics, `>5 km` origin/destination mismatches, static pre-cached OSM fallbacks (`cached_high_density_osm_graph`), active blocked segments, and corridors within `400m` of active severe IMD hazards or `BLOCKED` road incidents. Marks routes **`Verified Safe Route`** ONLY when an authoritative Valhalla/PostGIS engine and a fresh (`<=6h`) road-closure feed both pass; labels OSRM or missing/stale road-closure corridors **`Road-Closure Safety Unverified`** (amber dashed line + warning card, never `"Verified Safe"`). |
+| **ML Risk Inference (`/api/risk/predict`)** | Submits `{ rainfall_1h, rainfall_24h }` and handles timeouts, `503` service unavailability, and malformed responses cleanly without fabricating fallback scores. |
+| **Emergency SOS & Cancel (`/api/sos`, `/api/sos/cancel`)** | Distinguishes `confirmed_persisted` (`persisted: true`), `received_unpersisted` (`persisted: false`), and `queued_not_delivered` (`503`/timeout/unconfirmed saved in `AsyncStorage` with idempotent `clientRequestId`). Retains active beacon until server explicitly confirms `{ cancelled: true }`. Never triggers automatic emergency calls. |
+| **Live IMD Feeds (`/api/live/*`)** | Verifies both `status === 'OK'` and `isLive !== false`; sample data is off by default and strictly blocked in production builds. |

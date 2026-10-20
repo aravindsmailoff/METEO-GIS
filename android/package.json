@@ -10,6 +10,7 @@
     "preview": "vite build && vite preview --host 0.0.0.0 --port 5173",
     "dev:web": "vite --host 0.0.0.0 --port 5173",
     "build:preview": "vite build",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },
@@ -24,11 +25,11 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-native": "0.76.6",
-    "react-native-gesture-handler": "^2.20.2",
-    "react-native-reanimated": "^3.16.5",
+    "react-native-gesture-handler": "2.22.1",
+    "react-native-reanimated": "3.16.5",
     "react-native-safe-area-context": "^4.14.0",
     "react-native-screens": "^3.35.0",
-    "react-native-svg": "^15.9.0",
+    "react-native-svg": "15.8.0",
     "react-native-web": "^0.19.13",
     "react-native-webview": "^13.12.5",
     "zustand": "^4.5.6"
@@ -46,6 +47,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "leaflet": "^1.9.4",
     "typescript": "^5.7.2",
-    "vite": "^6.0.6"
+    "vite": "^6.0.6",
+    "vitest": "^5.0.5"
   }
 }

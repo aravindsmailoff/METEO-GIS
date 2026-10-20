@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,6 +9,19 @@ import {
 } from 'react-native';
 import axios from 'axios';
 import { API_ROUTES } from '../../../config/api';
+import { useNetworkStatus } from '../../../hooks/useNetworkStatus';
+import {
+  fetchVerifiedEvacuationRoute,
+} from '../../../safety/routeSafety';
+import {
+  cancelConfirmedSos,
+  dialEmergencyNumber,
+  EMERGENCY_HELPLINES,
+  INITIAL_SOS_SNAPSHOT,
+  loadPendingSosRecord,
+  SosSnapshot,
+  submitOrRetrySos,
+} from '../../../safety/sosManager';
 import { useAppStore } from '../../../store/appStore';
 import { HazardsPayload } from '../../../types/meteo';
 import { formatCompactNumber } from '../../../utils/formatters';
@@ -17,169 +30,278 @@ interface ImpactTabProps {
   hazards: HazardsPayload;
 }
 
-function normalizeRouteCoords(
-  raw: any,
-  origin: { lat: number; lon: number },
-  dest: { lat: number; lon: number }
-): [number, number][] {
-  const candidates =
-    raw?.route?.geometry?.coordinates ||
-    raw?.geometry?.coordinates ||
-    raw?.coordinates ||
-    raw?.path ||
-    raw?.route_points;
-
-  if (Array.isArray(candidates) && candidates.length >= 2) {
-    return candidates.map((pt: any) => {
-      if (Array.isArray(pt) && pt.length >= 2) {
-        // Detect [lat, lng] vs [lng, lat] for India bounds (lat 6..38, lng 67..98)
-        const a = Number(pt[0]);
-        const b = Number(pt[1]);
-        if (a > 60 && b < 42) return [a, b] as [number, number];
-        return [b, a] as [number, number];
-      }
-      return [Number(pt.lon ?? pt.lng ?? origin.lon), Number(pt.lat ?? origin.lat)] as [
-        number,
-        number,
-      ];
-    });
-  }
-
-  return [
-    [origin.lon, origin.lat],
-    [(origin.lon + dest.lon) / 2 + 0.04, (origin.lat + dest.lat) / 2 + 0.03],
-    [dest.lon, dest.lat],
-  ];
-}
-
 export const ImpactTab: React.FC<ImpactTabProps> = ({ hazards }) => {
   const selectedEvidence = useAppStore((s) => s.selectedEvidence);
   const selectedPluvialZone = useAppStore((s) => s.selectedPluvialZone);
   const selectedHotspot = useAppStore((s) => s.selectedHotspot);
   const activeRouteOverlay = useAppStore((s) => s.activeRouteOverlay);
   const setActiveRouteOverlay = useAppStore((s) => s.setActiveRouteOverlay);
+  const { isOnline } = useNetworkStatus();
 
   const [routingMode, setRoutingMode] = useState<'safe' | 'emergency' | null>(null);
-  const [isolationSummary, setIsolationSummary] = useState<{ count: number; source: string } | null>(
-    null
-  );
-  const [sosReportId, setSosReportId] = useState<string | null>(null);
+  const [lastRequestedMode, setLastRequestedMode] = useState<'safe' | 'emergency'>('safe');
+  const [routeUnavailable, setRouteUnavailable] = useState<{
+    title: string;
+    detail: string;
+  } | null>(null);
+
+  const [isolationSummary, setIsolationSummary] = useState<{
+    available: boolean;
+    count: number;
+    source: string;
+  } | null>(null);
+
+  const [sosState, setSosState] = useState<SosSnapshot>(INITIAL_SOS_SNAPSHOT);
   const [sosBusy, setSosBusy] = useState<boolean>(false);
+  const [dialNotice, setDialNotice] = useState<string | null>(null);
+
   const [incidentNote, setIncidentNote] = useState<string>('');
-  const [incidentSavedMsg, setIncidentSavedMsg] = useState<string | null>(null);
+  const [incidentBusy, setIncidentBusy] = useState<boolean>(false);
+  const [incidentFeedback, setIncidentFeedback] = useState<{
+    ok: boolean;
+    text: string;
+  } | null>(null);
+
+  // Hydrate genuinely persisted unsent SOS from AsyncStorage on mount
+  useEffect(() => {
+    let mounted = true;
+    loadPendingSosRecord().then((pending) => {
+      if (!mounted || !pending) return;
+      setSosState({
+        status: 'queued_not_delivered',
+        reportId: null,
+        alertId: null,
+        persisted: false,
+        clientRequestId: pending.clientRequestId,
+        message: `NOT DELIVERED — Saved locally from ${pending.triggeredAtDevice} (${pending.attemptCount} failed attempt${pending.attemptCount === 1 ? '' : 's'}).`,
+        cancelError: null,
+        pendingOfflineRecord: pending,
+      });
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Automatically retry queued local SOS with idempotent `clientRequestId` when network restores
+  useEffect(() => {
+    if (!isOnline || sosState.status !== 'queued_not_delivered' || !sosState.pendingOfflineRecord) {
+      return;
+    }
+    const rec = sosState.pendingOfflineRecord;
+    setSosBusy(true);
+    submitOrRetrySos({
+      latitude: rec.latitude,
+      longitude: rec.longitude,
+      accuracyM: rec.accuracyM,
+      existingRecord: rec,
+    })
+      .then((next) => setSosState(next))
+      .finally(() => setSosBusy(false));
+  }, [isOnline, sosState.pendingOfflineRecord, sosState.status]);
 
   useEffect(() => {
+    let cancelled = false;
     axios
       .get(API_ROUTES.isolation(), { timeout: 6000 })
       .then((res) => {
+        if (cancelled) return;
         const d = res.data;
-        const list = d?.isolated_villages || d?.villages || d?.corridors || [];
+        const list = d?.isolated_villages || d?.villages || d?.corridors;
+        const count = Array.isArray(list)
+          ? list.length
+          : typeof d?.isolated_count === 'number'
+            ? d.isolated_count
+            : null;
+        if (count === null) {
+          setIsolationSummary({
+            available: false,
+            count: 0,
+            source: 'Isolation feed returned no corridor list',
+          });
+          return;
+        }
+        const srcLabel =
+          d?.source === 'static_fallback'
+            ? 'Static Reference Dataset — FastAPI PostGIS Unreachable'
+            : d?.source || 'Valhalla Connectivity Service';
         setIsolationSummary({
-          count: Array.isArray(list) ? list.length : d?.isolated_count || 6,
-          source: d?.source || 'Valhalla Graph Connectivity Engine',
+          available: d?.source !== 'static_fallback',
+          count,
+          source: srcLabel,
         });
       })
       .catch(() => {
-        setIsolationSummary({ count: 6, source: 'Cached Corridor Isolation Graph' });
+        if (!cancelled) {
+          setIsolationSummary({
+            available: false,
+            count: 0,
+            source: 'Isolation telemetry currently unreachable',
+          });
+        }
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const seg = hazards.userSegmentation;
 
-  const computeEvacuationRoute = async (mode: 'safe' | 'emergency') => {
-    setRoutingMode(mode);
-    const baseLat = selectedEvidence?.lat ?? 10.3797;
-    const baseLon = selectedEvidence?.lng ?? 78.8208;
-    const origin = { lat: baseLat, lon: baseLon };
-    const destination = { lat: baseLat + 0.14, lon: baseLon - 0.12 };
+  const computeEvacuationRoute = useCallback(
+    async (mode: 'safe' | 'emergency') => {
+      setRoutingMode(mode);
+      setLastRequestedMode(mode);
+      setRouteUnavailable(null);
 
-    try {
-      const endpoint =
-        mode === 'emergency' ? API_ROUTES.emergencyRoute() : API_ROUTES.safeRoute();
-      const res = await axios.post(
-        endpoint,
-        { origin, destination },
-        { timeout: 6000 }
-      );
-      const coords = normalizeRouteCoords(res.data, origin, destination);
-      setActiveRouteOverlay({
-        mode,
-        distanceKm: Number(res.data?.distance_km ?? res.data?.summary?.length ?? 18.4),
-        durationMin: Number(res.data?.duration_min ?? res.data?.summary?.time_min ?? 27),
-        summary:
-          mode === 'emergency'
-            ? 'NDRF Priority Responder Corridor (Flood-Free)'
-            : 'Citizen Safe Evacuation Route (Avoids Low-Lying DEM)',
-        coordinates: coords,
+      if (!selectedEvidence || !Number.isFinite(selectedEvidence.lat) || !Number.isFinite(selectedEvidence.lng)) {
+        setActiveRouteOverlay(null);
+        setRouteUnavailable({
+          title: 'Verified Safe Route Unavailable',
+          detail:
+            'Select a district, warning polygon, or station on the map first so routing starts from verified coordinates.',
+        });
+        setRoutingMode(null);
+        return;
+      }
+
+      const origin = { lat: selectedEvidence.lat, lon: selectedEvidence.lng };
+      const destination = {
+        lat: Number((selectedEvidence.lat + 0.14).toFixed(6)),
+        lon: Number((selectedEvidence.lng - 0.12).toFixed(6)),
+      };
+
+      try {
+        const validated = await fetchVerifiedEvacuationRoute({
+          mode,
+          origin,
+          destination,
+          hazards,
+        });
+
+        if (!validated.ok) {
+          setActiveRouteOverlay(null);
+          setRouteUnavailable({
+            title: validated.title,
+            detail: validated.detail,
+          });
+          return;
+        }
+
+        setRouteUnavailable(null);
+        setActiveRouteOverlay(validated.overlay);
+      } finally {
+        setRoutingMode(null);
+      }
+    },
+    [hazards, selectedEvidence, setActiveRouteOverlay]
+  );
+
+  const handleTriggerOrRetrySos = async () => {
+    const lat = sosState.pendingOfflineRecord?.latitude ?? selectedEvidence?.lat;
+    const lng = sosState.pendingOfflineRecord?.longitude ?? selectedEvidence?.lng;
+
+    if (typeof lat !== 'number' || typeof lng !== 'number') {
+      setSosState({
+        ...INITIAL_SOS_SNAPSHOT,
+        status: 'failed',
+        message:
+          'Select your location/sector on the map first so emergency responders receive accurate coordinates, or call 112 / 1077 below.',
       });
-    } catch {
-      setActiveRouteOverlay({
-        mode,
-        distanceKm: 18.4,
-        durationMin: 27,
-        summary: 'Local Fallback Road Corridor Plotted on Map',
-        coordinates: normalizeRouteCoords(null, origin, destination),
-      });
-    } finally {
-      setRoutingMode(null);
+      return;
     }
-  };
 
-  const handleTriggerSos = async () => {
     setSosBusy(true);
     try {
-      const res = await axios.post(
-        API_ROUTES.sos(),
-        {
-          latitude: selectedEvidence?.lat ?? 10.3797,
-          longitude: selectedEvidence?.lng ?? 78.8208,
-          triggered_at_device: new Date().toISOString(),
-        },
-        { timeout: 6000 }
-      );
-      setSosReportId(res.data?.report_id || 'SOS-LIVE-01');
-    } catch {
-      setSosReportId('SOS-QUEUED-OFFLINE');
+      const next = await submitOrRetrySos({
+        latitude: lat,
+        longitude: lng,
+        existingRecord: sosState.pendingOfflineRecord,
+      });
+      setSosState(next);
     } finally {
       setSosBusy(false);
     }
   };
 
   const handleCancelSos = async () => {
-    if (!sosReportId) return;
     setSosBusy(true);
     try {
-      await axios.post(API_ROUTES.sosCancel(), { report_id: sosReportId }, { timeout: 5000 });
-    } catch {
-      // Clear local state safely even if network momentarily drops
+      const next = await cancelConfirmedSos({ current: sosState });
+      setSosState(next);
     } finally {
-      setSosReportId(null);
       setSosBusy(false);
     }
   };
 
+  const handleDialHelpline = async (number: '112' | '1077') => {
+    const opened = await dialEmergencyNumber(number);
+    setDialNotice(
+      opened
+        ? `Opened phone dialer for ${number}. Confirm call in your dialer to connect.`
+        : `Dialer unavailable on this device — dial ${number} directly on a phone.`
+    );
+  };
+
   const handleSubmitFieldReport = async () => {
-    if (!incidentNote.trim()) return;
+    const cleanNote = incidentNote.trim();
+    if (!cleanNote) return;
+
+    if (
+      !selectedEvidence ||
+      typeof selectedEvidence.lat !== 'number' ||
+      typeof selectedEvidence.lng !== 'number'
+    ) {
+      setIncidentFeedback({
+        ok: false,
+        text: 'Select a valid map location first so field reports include verified GPS coordinates.',
+      });
+      return;
+    }
+
+    setIncidentBusy(true);
     try {
       const res = await axios.post(
         API_ROUTES.citizenReport(),
         {
           incident_type: 'WATERLOGGING_OR_SLOPE_HAZARD',
           severity: 'HIGH',
-          description: incidentNote.trim(),
-          latitude: selectedEvidence?.lat ?? 10.3797,
-          longitude: selectedEvidence?.lng ?? 78.8208,
+          description: cleanNote,
+          latitude: selectedEvidence.lat,
+          longitude: selectedEvidence.lng,
           road_blocked: true,
         },
         { timeout: 6000 }
       );
-      setIncidentSavedMsg(
-        `Queued (${res.data?.report_id || 'REP-LIVE'}) for NDRF / District Control Room triage.`
-      );
-      setIncidentNote('');
-    } catch {
-      setIncidentSavedMsg('Saved locally and queued for sync on reconnect.');
-      setIncidentNote('');
+
+      if (res.data?.report_id && res.data?.persisted === true) {
+        setIncidentFeedback({
+          ok: true,
+          text: `Confirmed (${res.data.report_id}): persisted to emergency database for NDRF triage.`,
+        });
+        setIncidentNote('');
+      } else if (res.data?.report_id) {
+        setIncidentFeedback({
+          ok: false,
+          text: `Gateway Receipt (${res.data.report_id}) — NOT persisted to PostGIS database (stateless Next.js endpoint). Call 1077 / 112 for urgent dispatch.`,
+        });
+        setIncidentNote('');
+      } else {
+        setIncidentFeedback({
+          ok: false,
+          text:
+            res.data?.error ||
+            'Report could not be confirmed as persisted by emergency backend. Please retry.',
+        });
+      }
+    } catch (err: any) {
+      setIncidentFeedback({
+        ok: false,
+        text:
+          err?.response?.data?.error ||
+          'Report NOT sent — emergency backend unreachable. Keep note and retry when online.',
+      });
+    } finally {
+      setIncidentBusy(false);
     }
   };
 
@@ -223,9 +345,7 @@ export const ImpactTab: React.FC<ImpactTabProps> = ({ hazards }) => {
             Depression: {selectedPluvialZone.relativeDepressionM}m · DEM: {selectedPluvialZone.demElevationM}m
           </Text>
           {selectedHotspot && (
-            <Text style={styles.hotspotAction}>
-              Action: {selectedHotspot.recommendation}
-            </Text>
+            <Text style={styles.hotspotAction}>Action: {selectedHotspot.recommendation}</Text>
           )}
         </View>
       )}
@@ -259,19 +379,53 @@ export const ImpactTab: React.FC<ImpactTabProps> = ({ hazards }) => {
           </Pressable>
         </View>
 
-        {activeRouteOverlay && (
-          <View style={styles.routeResult}>
+        {routeUnavailable && (
+          <View style={styles.routeErrorBox}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.routeTitle}>{activeRouteOverlay.summary}</Text>
-              <Text style={styles.routeMeta}>
-                Distance: {activeRouteOverlay.distanceKm.toFixed(1)} km · Est. Time:{' '}
-                {Math.round(activeRouteOverlay.durationMin)} min
-              </Text>
+              <Text style={styles.routeErrorTitle}>⚠ {routeUnavailable.title}</Text>
+              <Text style={styles.routeErrorSub}>{routeUnavailable.detail}</Text>
             </View>
             <Pressable
-              onPress={() => setActiveRouteOverlay(null)}
+              onPress={() => computeEvacuationRoute(lastRequestedMode)}
               style={styles.clearRouteBtn}
             >
+              <Text style={styles.clearRouteText}>Retry</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {activeRouteOverlay && (
+          <View
+            style={
+              activeRouteOverlay.closureVerification === 'closure_unverified'
+                ? styles.routeUnverifiedResult
+                : styles.routeResult
+            }
+          >
+            <View style={{ flex: 1 }}>
+              <Text
+                style={
+                  activeRouteOverlay.closureVerification === 'closure_unverified'
+                    ? styles.routeUnverifiedTitle
+                    : styles.routeTitle
+                }
+              >
+                {activeRouteOverlay.closureVerification === 'closure_unverified'
+                  ? `⚠ ${activeRouteOverlay.summary}`
+                  : `✓ ${activeRouteOverlay.summary}`}
+              </Text>
+              <Text style={styles.routeMeta}>
+                Distance: {activeRouteOverlay.distanceKm.toFixed(1)} km · Est. Time:{' '}
+                {Math.round(activeRouteOverlay.durationMin)} min · Vertices:{' '}
+                {activeRouteOverlay.coordinates.length}
+              </Text>
+              {activeRouteOverlay.closureWarning && (
+                <Text style={styles.routeUnverifiedWarning}>
+                  {activeRouteOverlay.closureWarning}
+                </Text>
+              )}
+            </View>
+            <Pressable onPress={() => setActiveRouteOverlay(null)} style={styles.clearRouteBtn}>
               <Text style={styles.clearRouteText}>Clear</Text>
             </Pressable>
           </View>
@@ -279,7 +433,9 @@ export const ImpactTab: React.FC<ImpactTabProps> = ({ hazards }) => {
 
         {isolationSummary && (
           <Text style={styles.isolationNote}>
-            🏘 Village Isolation Monitor: {isolationSummary.count} vulnerable corridors tracked ({isolationSummary.source})
+            {isolationSummary.available
+              ? `🏘 Village Isolation Monitor: ${isolationSummary.count} vulnerable corridors tracked (${isolationSummary.source})`
+              : `⚠ Village Isolation Monitor: ${isolationSummary.source}`}
           </Text>
         )}
       </View>
@@ -287,20 +443,111 @@ export const ImpactTab: React.FC<ImpactTabProps> = ({ hazards }) => {
       {/* Citizen SOS & Geotagged Field Incident Triage */}
       <View style={styles.card}>
         <Text style={styles.heading}>EMERGENCY SOS & FIELD REPORT (/api/sos · /api/citizen/report)</Text>
-        {sosReportId ? (
-          <View style={styles.sosActiveRow}>
-            <Text style={styles.sosActiveText}>
-              🚨 Active Beacon: {sosReportId}
+
+        {sosState.status === 'confirmed_persisted' && sosState.reportId ? (
+          <View style={styles.sosConfirmedBox}>
+            <Text style={styles.sosConfirmedTitle}>
+              🚨 Confirmed Active SOS Beacon: {sosState.reportId}
             </Text>
+            <Text style={styles.sosConfirmedSub}>{sosState.message}</Text>
+            {sosState.cancelError && (
+              <Text style={styles.sosErrorText}>{sosState.cancelError}</Text>
+            )}
             <Pressable onPress={handleCancelSos} disabled={sosBusy} style={styles.safeBtn}>
-              <Text style={styles.routeBtnText}>✓ I Am Safe (Cancel)</Text>
+              <Text style={styles.routeBtnText}>
+                {sosBusy ? 'Confirming All-Clear…' : '✓ I Am Safe (Request Server Cancel)'}
+              </Text>
             </Pressable>
           </View>
+        ) : sosState.status === 'received_unpersisted' && sosState.reportId ? (
+          <View style={styles.sosUnpersistedBox}>
+            <Text style={styles.sosUnpersistedTitle}>
+              ⚠ Server Received ({sosState.reportId}) — NOT SAVED TO DB (persisted: false)
+            </Text>
+            <Text style={styles.sosUnpersistedSub}>{sosState.message}</Text>
+            {sosState.cancelError && (
+              <Text style={styles.sosErrorText}>{sosState.cancelError}</Text>
+            )}
+            <View style={styles.btnRow}>
+              <Pressable
+                onPress={handleTriggerOrRetrySos}
+                disabled={sosBusy}
+                style={[styles.routeBtn, { backgroundColor: '#b45309' }]}
+              >
+                <Text style={styles.routeBtnText}>↻ Retry DB Save</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleCancelSos}
+                disabled={sosBusy}
+                style={[styles.routeBtn, { backgroundColor: '#059669' }]}
+              >
+                <Text style={styles.routeBtnText}>✓ Cancel Beacon</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : sosState.status === 'queued_not_delivered' ? (
+          <View style={styles.sosOfflineBox}>
+            <Text style={styles.sosOfflineTitle}>
+              ✗ SOS NOT DELIVERED — Saved Locally Offline (0 Responders Notified)
+            </Text>
+            <Text style={styles.sosOfflineSub}>{sosState.message}</Text>
+            <View style={styles.btnRow}>
+              <Pressable
+                onPress={handleTriggerOrRetrySos}
+                disabled={sosBusy}
+                style={[styles.routeBtn, { backgroundColor: '#dc2626' }]}
+              >
+                <Text style={styles.routeBtnText}>
+                  {sosBusy ? 'Retrying…' : '↻ Retry SOS Now'}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleCancelSos}
+                disabled={sosBusy}
+                style={[styles.routeBtn, { backgroundColor: '#334155' }]}
+              >
+                <Text style={styles.routeBtnText}>Discard Local Draft</Text>
+              </Pressable>
+            </View>
+          </View>
         ) : (
-          <Pressable onPress={handleTriggerSos} disabled={sosBusy} style={styles.sosBtn}>
-            <Text style={styles.routeBtnText}>🆘 Dispatch Emergency SOS Beacon</Text>
-          </Pressable>
+          <View style={{ gap: 8 }}>
+            {sosState.status === 'failed' && sosState.message && (
+              <Text style={styles.sosErrorText}>{sosState.message}</Text>
+            )}
+            <Pressable
+              onPress={handleTriggerOrRetrySos}
+              disabled={sosBusy}
+              style={styles.sosBtn}
+            >
+              <Text style={styles.routeBtnText}>
+                {sosBusy ? 'Transmitting SOS…' : '🆘 Dispatch Emergency SOS Beacon'}
+              </Text>
+            </Pressable>
+            {sosState.message && sosState.status === 'idle' && (
+              <Text style={styles.savedMsg}>{sosState.message}</Text>
+            )}
+          </View>
         )}
+
+        {/* Explicit Voice Helpline Dialer Controls (Never claims call happened automatically) */}
+        <View style={styles.helplineBox}>
+          <Text style={styles.helplineDisclaimer}>
+            Voice Call Notice: Sending an SOS data beacon does NOT place a phone call. No call is placed unless you tap a helpline below and confirm in your phone dialer:
+          </Text>
+          <View style={styles.btnRow}>
+            {EMERGENCY_HELPLINES.map((hl) => (
+              <Pressable
+                key={hl.number}
+                onPress={() => handleDialHelpline(hl.number)}
+                style={styles.helplineBtn}
+              >
+                <Text style={styles.helplineBtnText}>📞 Call {hl.number}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {dialNotice && <Text style={styles.isolationNote}>{dialNotice}</Text>}
+        </View>
 
         <View style={styles.reportRow}>
           <TextInput
@@ -310,11 +557,19 @@ export const ImpactTab: React.FC<ImpactTabProps> = ({ hazards }) => {
             placeholderTextColor="#64748b"
             style={styles.reportInput}
           />
-          <Pressable onPress={handleSubmitFieldReport} style={styles.sendBtn}>
-            <Text style={styles.routeBtnText}>Send</Text>
+          <Pressable
+            onPress={handleSubmitFieldReport}
+            disabled={incidentBusy}
+            style={styles.sendBtn}
+          >
+            <Text style={styles.routeBtnText}>{incidentBusy ? '…' : 'Send'}</Text>
           </Pressable>
         </View>
-        {incidentSavedMsg && <Text style={styles.savedMsg}>{incidentSavedMsg}</Text>}
+        {incidentFeedback && (
+          <Text style={incidentFeedback.ok ? styles.savedMsg : styles.sosErrorText}>
+            {incidentFeedback.text}
+          </Text>
+        )}
       </View>
     </View>
   );
@@ -401,6 +656,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
   },
+  routeErrorBox: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127, 29, 29, 0.35)',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  routeErrorTitle: {
+    color: '#fecaca',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  routeErrorSub: {
+    color: '#fca5a5',
+    fontSize: 11,
+    marginTop: 2,
+  },
   routeResult: {
     padding: 10,
     borderRadius: 10,
@@ -411,10 +686,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  routeUnverifiedResult: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(120, 53, 15, 0.38)',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   routeTitle: {
     color: '#6ee7b7',
     fontSize: 12,
     fontWeight: '800',
+  },
+  routeUnverifiedTitle: {
+    color: '#fde68a',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  routeUnverifiedWarning: {
+    color: '#fed7aa',
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 4,
   },
   routeMeta: {
     color: '#cbd5e1',
@@ -445,13 +741,61 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sosActiveRow: {
+  sosConfirmedBox: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(6, 78, 59, 0.35)',
+    borderWidth: 1,
+    borderColor: '#10b981',
     gap: 8,
   },
-  sosActiveText: {
-    color: '#fca5a5',
+  sosConfirmedTitle: {
+    color: '#6ee7b7',
     fontSize: 12.5,
     fontWeight: '800',
+  },
+  sosConfirmedSub: {
+    color: '#d1fae5',
+    fontSize: 11,
+  },
+  sosUnpersistedBox: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(120, 53, 15, 0.42)',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    gap: 8,
+  },
+  sosUnpersistedTitle: {
+    color: '#fde68a',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  sosUnpersistedSub: {
+    color: '#fef3c7',
+    fontSize: 11,
+  },
+  sosOfflineBox: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(127, 29, 29, 0.45)',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    gap: 8,
+  },
+  sosOfflineTitle: {
+    color: '#fecaca',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  sosOfflineSub: {
+    color: '#fca5a5',
+    fontSize: 11,
+  },
+  sosErrorText: {
+    color: '#fca5a5',
+    fontSize: 11.5,
+    fontWeight: '700',
   },
   safeBtn: {
     minHeight: 48,
@@ -459,6 +803,34 @@ const styles = StyleSheet.create({
     backgroundColor: '#059669',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  helplineBox: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: '#020617',
+    borderWidth: 1,
+    borderColor: '#334155',
+    gap: 8,
+  },
+  helplineDisclaimer: {
+    color: '#94a3b8',
+    fontSize: 10.5,
+    lineHeight: 15,
+  },
+  helplineBtn: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 10,
+    backgroundColor: '#1e293b',
+    borderWidth: 1,
+    borderColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  helplineBtnText: {
+    color: '#fecaca',
+    fontSize: 12,
+    fontWeight: '800',
   },
   reportRow: {
     flexDirection: 'row',

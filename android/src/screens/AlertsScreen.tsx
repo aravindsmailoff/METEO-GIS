@@ -13,6 +13,7 @@ import { EmptyState } from '../components/common/EmptyState';
 import { ErrorRetry } from '../components/common/ErrorRetry';
 import { LoadingState } from '../components/common/LoadingState';
 import { OfflineBanner } from '../components/common/OfflineBanner';
+import { SampleDataBanner } from '../components/common/SampleDataBanner';
 import { QUICK_STATES } from '../data/indiaGeoCatalog';
 import { useHazards } from '../hooks/useHazards';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -70,6 +71,8 @@ export const AlertsScreen: React.FC = () => {
           }}
         />
       </View>
+
+      {(dataState === 'sample' || warningsPayload.isReferenceSnapshot) && <SampleDataBanner />}
 
       {!isOnline && <OfflineBanner fetchedAt={fetchedAt} onRetry={refetch} />}
 

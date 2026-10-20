@@ -10,7 +10,7 @@ web-build/
 .expo/
 *.tsbuildinfo
 
-# Native Android build artifacts & local SDK config
+# Native Android build artifacts, signing keys & local SDK config (never commit keystores/APKs)
 android/.gradle/
 android/build/
 android/app/build/
@@ -18,7 +18,10 @@ android/local.properties
 *.apk
 *.aab
 *.keystore
-!android/app/debug.keystore
+*.jks
+!android/gradle/wrapper/gradle-wrapper.jar
+!android/gradlew
+!android/gradlew.bat
 
 # Logs & Editor files
 npm-debug.log*
