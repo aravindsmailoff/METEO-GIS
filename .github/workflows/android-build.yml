@@ -273,7 +273,7 @@ jobs:
   android-device-runtime-e2e:
     name: Install Signed APKs on Android 14 Device & Verify Live Runtime
     needs: android-verify-and-build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -346,14 +346,28 @@ jobs:
             export ANDROID_SDK_ROOT="${SDK_ROOT}"
             export PATH="${SDK_ROOT}/cmdline-tools/latest/bin:${SDK_ROOT}/emulator:${SDK_ROOT}/platform-tools:${PATH}"
 
+            echo "=== Host KVM Check ==="
+            ls -la /dev/kvm || true
+            if [ -e /dev/kvm ]; then
+              echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+              sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true
+              sudo chmod 666 /dev/kvm || true
+            fi
+
             yes | sdkmanager --sdk_root="${SDK_ROOT}" --licenses >/dev/null || true
             sdkmanager --sdk_root="${SDK_ROOT}" --install \
               "platform-tools" \
               "emulator" \
               "platforms;android-34" \
-              "system-images;android-34;default;x86_64" >/dev/null
+              "system-images;android-34;google_apis;x86_64" >/dev/null
 
-            echo "no" | avdmanager create avd -n meteogis_api34 -k "system-images;android-34;default;x86_64" --device "pixel_6" --force
+            echo "no" | avdmanager create avd \
+              -n meteogis_api34 \
+              -k "system-images;android-34;google_apis;x86_64" \
+              --device "pixel_6" \
+              --force
+
+            adb start-server
 
             nohup "${SDK_ROOT}/emulator/emulator" \
               -avd meteogis_api34 \
@@ -361,22 +375,38 @@ jobs:
               -no-audio \
               -no-boot-anim \
               -no-snapshot \
+              -no-metrics \
               -gpu swiftshader_indirect \
               -memory 4096 \
               -cores 4 \
               -dns-server 8.8.8.8,1.1.1.1 >/tmp/device-proof/emulator.log 2>&1 &
             EMU_PID=$!
 
-            adb wait-for-device
+            BOOTED=0
             for i in $(seq 1 90); do
+              if ! kill -0 "$EMU_PID" 2>/dev/null; then
+                echo "ERROR: Emulator process exited prematurely at $((i * 2))s!"
+                cat /tmp/device-proof/emulator.log || true
+                exit 1
+              fi
               BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r" || true)
               if [ "$BOOT" = "1" ]; then
-                echo "Android 14 device booted in $((i * 2))s!"
+                echo "Android 14 (API 34) device booted in $((i * 2))s!"
+                BOOTED=1
                 break
               fi
               sleep 2
             done
 
+            if [ "$BOOTED" -ne 1 ]; then
+              echo "ERROR: Emulator did not reach sys.boot_completed=1 within 180s!"
+              tail -n 60 /tmp/device-proof/emulator.log || true
+              exit 1
+            fi
+
+            adb shell settings put global window_animation_scale 0 || true
+            adb shell settings put global transition_animation_scale 0 || true
+            adb shell settings put global animator_duration_scale 0 || true
             adb shell input keyevent 82 || true
             sleep 2
             adb logcat -c
