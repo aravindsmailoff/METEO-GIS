@@ -1,13 +1,10 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import axios from 'axios';
-import { API_ROUTES } from '../../../config/api';
-import { MONITORED_DWR_NETWORK } from '../../../data/indiaGeoCatalog';
 import {
-  buildRiskPredictRequest,
-  parseRiskPredictResponse,
+  executeRiskPrediction,
   VerifiedRiskPrediction,
 } from '../../../safety/riskPrediction';
+import { MONITORED_DWR_NETWORK } from '../../../data/indiaGeoCatalog';
 import { useAppStore } from '../../../store/appStore';
 import {
   DataState,
@@ -44,33 +41,20 @@ export const ObsTab: React.FC<ObsTabProps> = ({
   const [mlError, setMlError] = useState<string | null>(null);
 
   const runMlRiskInference = async () => {
-    const reqBuild = buildRiskPredictRequest(selectedEvidence, stations);
-    if (!reqBuild.ok) {
-      setMlResult(null);
-      setMlError(reqBuild.error);
-      return;
-    }
-
     setPredicting(true);
     setMlError(null);
     try {
-      const res = await axios.post(API_ROUTES.riskPredict(), reqBuild.body, {
-        timeout: 6000,
+      const outcome = await executeRiskPrediction({
+        evidence: selectedEvidence,
+        stations,
+        timeoutMs: 6000,
       });
-      const parsed = parseRiskPredictResponse(res.data);
-      if (!parsed.ok) {
+      if (!outcome.ok) {
         setMlResult(null);
-        setMlError(parsed.error);
+        setMlError(outcome.error);
         return;
       }
-      setMlResult(parsed.data);
-    } catch (err: any) {
-      setMlResult(null);
-      setMlError(
-        err?.response?.data?.error ||
-          err?.message ||
-          'Risk prediction failed — unable to reach /api/risk/predict.'
-      );
+      setMlResult(outcome.data);
     } finally {
       setPredicting(false);
     }

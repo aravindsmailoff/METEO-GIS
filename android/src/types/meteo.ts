@@ -264,12 +264,19 @@ export interface TelemetryProvider {
   description: string;
 }
 
+export type RouteClosureVerification = 'verified' | 'closure_unverified';
+export type ClosureFeedStatus = 'fresh' | 'stale' | 'missing';
+
 export interface ActiveRouteOverlay {
   mode: 'safe' | 'emergency';
   distanceKm: number;
   durationMin: number;
   summary: string;
   coordinates: [number, number][]; // [lng, lat] pairs
+  closureVerification: RouteClosureVerification;
+  closureStatus: ClosureFeedStatus;
+  verificationBadge: 'Verified Safe Route' | 'Road-Closure Safety Unverified';
+  closureWarning: string | null;
 }
 
 export interface LayerPreferences {

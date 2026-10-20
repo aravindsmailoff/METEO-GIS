@@ -35,7 +35,7 @@ const EMPTY_HAZARDS: HazardsPayload = {
   isReferenceSnapshot: false,
 };
 
-describe('Phase 2 Data Integrity, Gradle Wrapper & Cleartext Security Suite', () => {
+describe('Phase 2 Data Integrity, Gradle Wrapper, Keystore Hygiene & Cleartext Security Suite', () => {
   describe('4. Sample Data Disabled by Default & Never Presented as Live', () => {
     it('disables sample fallback by default in store (`useReferenceFallbackWhenUpstreamDown === false`)', () => {
       expect(useAppStore.getState().useReferenceFallbackWhenUpstreamDown).toBe(false);
@@ -56,7 +56,7 @@ describe('Phase 2 Data Integrity, Gradle Wrapper & Cleartext Security Suite', ()
       expect(outcome.payload.events).toHaveLength(0);
       expect(outcome.shouldPersistToCache).toBe(false);
 
-      // Also catches `/api/live/hazards` returning `{ status: 'OK', isLive: false }` when upstream IMD is down!
+      // Also catches `/api/live/hazards` returning `{ status: 'OK', isLive: false }` when upstream IMD is down
       const deceptiveOkNotLive = resolveFeedOutcome<HazardsPayload>({
         upstreamPayload: { ...EMPTY_HAZARDS, status: 'OK', isLive: false },
         hasLiveItems: false,
@@ -129,7 +129,6 @@ describe('Phase 2 Data Integrity, Gradle Wrapper & Cleartext Security Suite', ()
       expect(devSample.shouldPersistToCache).toBe(false);
       expect(devSample.payload.isReferenceSnapshot).toBe(true);
 
-      // Even if a caller passed `state: 'success'`, `isReferenceSnapshot: true` MUST show `SAMPLE · NOT LIVE`
       const badge = getDataStatusBadgeConfig({
         state: 'success',
         fetchedAt: Date.now(),
@@ -139,25 +138,29 @@ describe('Phase 2 Data Integrity, Gradle Wrapper & Cleartext Security Suite', ()
     });
   });
 
-  describe('5 & 6. Reproducible Gradle Wrapper + Cleartext Loopback Restriction + Production HTTPS Enforcement', () => {
-    it('rejects unconfigured, HTTP, emulator, localhost, and placeholder URLs in production mode while accepting valid HTTPS endpoints', () => {
-      expect(() =>
-        resolveApiBase({
-          isDev: false,
-          platformOs: 'android',
-          configuredProdUrl: '',
-          customOverrideUrl: null,
-        })
-      ).toThrow();
-
-      expect(() =>
-        resolveApiBase({
-          isDev: false,
-          platformOs: 'android',
-          configuredProdUrl: 'http://10.0.2.2:3000',
-          customOverrideUrl: null,
-        })
-      ).toThrow();
+  describe('5 & 6. Reproducible Gradle Wrapper + Zero Keystores Committed + Debug-Scoped Cleartext + Production HTTPS', () => {
+    it('rejects empty, HTTP cleartext, emulator, localhost, loopback, and placeholder URLs in production mode while accepting valid HTTPS origins', () => {
+      for (const unsafeUrl of [
+        '',
+        'http://10.0.2.2:3000',
+        'https://10.0.2.2:3000',
+        'https://127.0.0.1:3000',
+        'https://localhost:3000',
+        'http://meteo-gis.vercel.app',
+        'https://example.com',
+        'https://api.example.org/v1',
+        'https://your-domain.com',
+        'https://<your-vercel-app>.vercel.app',
+      ]) {
+        expect(() =>
+          resolveApiBase({
+            isDev: false,
+            platformOs: 'android',
+            configuredProdUrl: unsafeUrl,
+            customOverrideUrl: null,
+          })
+        ).toThrow();
+      }
 
       expect(
         resolveApiBase({
@@ -167,24 +170,6 @@ describe('Phase 2 Data Integrity, Gradle Wrapper & Cleartext Security Suite', ()
           customOverrideUrl: null,
         })
       ).toBe('https://meteo-gis.vercel.app');
-
-      expect(() =>
-        resolveApiBase({
-          isDev: false,
-          platformOs: 'android',
-          configuredProdUrl: 'https://example.com',
-          customOverrideUrl: null,
-        })
-      ).toThrow();
-
-      expect(() =>
-        resolveApiBase({
-          isDev: false,
-          platformOs: 'android',
-          configuredProdUrl: 'http://api.meteo-gis.org',
-          customOverrideUrl: null,
-        })
-      ).toThrow();
 
       expect(
         resolveApiBase({
@@ -200,7 +185,7 @@ describe('Phase 2 Data Integrity, Gradle Wrapper & Cleartext Security Suite', ()
       expect(validateApiBaseCandidate('http://127.0.0.1:3000', true).valid).toBe(true);
     });
 
-    it('verifies Gradle wrapper artifacts, `OpenSourceMergedSoMapping`, `usesCleartextTraffic="false"`, and domain-scoped `network_security_config.xml`', () => {
+    it('verifies Gradle wrapper archive header, zero committed `.keystore` files, zero release cleartext exceptions, debug loopback overlay, and `MeteoAppConfigPackage` bridge', () => {
       const nativeRoot = path.resolve(__dirname, '../../android');
       const gradlew = path.join(nativeRoot, 'gradlew');
       const gradlewBat = path.join(nativeRoot, 'gradlew.bat');
@@ -211,8 +196,12 @@ describe('Phase 2 Data Integrity, Gradle Wrapper & Cleartext Security Suite', ()
         path.join(nativeRoot, 'app/src/main/AndroidManifest.xml'),
         'utf-8'
       );
-      const netSecXml = fs.readFileSync(
+      const releaseNetSecXml = fs.readFileSync(
         path.join(nativeRoot, 'app/src/main/res/xml/network_security_config.xml'),
+        'utf-8'
+      );
+      const debugNetSecXml = fs.readFileSync(
+        path.join(nativeRoot, 'app/src/debug/res/xml/network_security_config.xml'),
         'utf-8'
       );
       const appBuildGradle = fs.readFileSync(
@@ -223,22 +212,38 @@ describe('Phase 2 Data Integrity, Gradle Wrapper & Cleartext Security Suite', ()
         path.join(nativeRoot, 'app/src/main/java/com/meteogis/MainApplication.kt'),
         'utf-8'
       );
+      const configPkgKt = fs.readFileSync(
+        path.join(nativeRoot, 'app/src/main/java/com/meteogis/MeteoAppConfigPackage.kt'),
+        'utf-8'
+      );
 
       expect(fs.existsSync(gradlew)).toBe(true);
       expect(fs.statSync(gradlew).mode & 0o111).toBeGreaterThan(0);
       expect(fs.existsSync(gradlewBat)).toBe(true);
-      expect(fs.statSync(wrapperJar).size).toBeGreaterThan(30000);
-      expect(fs.readFileSync(wrapperProps, 'utf-8')).toContain('gradle-8.10.2');
-      expect(fs.existsSync(debugKeystore)).toBe(true);
 
+      // Verify `gradle-wrapper.jar` is a genuine PK ZIP/JAR archive > 30 KB
+      const jarBytes = fs.readFileSync(wrapperJar);
+      expect(jarBytes.length).toBeGreaterThan(30000);
+      expect(jarBytes[0]).toBe(0x50); // 'P'
+      expect(jarBytes[1]).toBe(0x4b); // 'K'
+      expect(fs.readFileSync(wrapperProps, 'utf-8')).toContain('gradle-8.10.2');
+
+      // Signing key hygiene: NO `.keystore` file checked into the repository
+      expect(fs.existsSync(debugKeystore)).toBe(false);
+
+      // Release network config has ZERO cleartext exceptions; debug overlay restricts cleartext strictly to loopback hosts
       expect(manifestXml).toContain('android:usesCleartextTraffic="false"');
-      expect(netSecXml).toContain('<base-config cleartextTrafficPermitted="false" />');
+      expect(releaseNetSecXml).toContain('<base-config cleartextTrafficPermitted="false" />');
+      expect(releaseNetSecXml).not.toContain('cleartextTrafficPermitted="true"');
+      expect(debugNetSecXml).toContain('<base-config cleartextTrafficPermitted="false" />');
       for (const host of APPROVED_DEV_CLEARTEXT_HOSTS) {
-        expect(netSecXml).toContain(`<domain includeSubdomains="false">${host}</domain>`);
+        expect(debugNetSecXml).toContain(`<domain includeSubdomains="false">${host}</domain>`);
       }
 
       expect(appBuildGradle).toContain('verifyReleaseApiConfig');
       expect(mainAppKt).toContain('OpenSourceMergedSoMapping');
+      expect(mainAppKt).toContain('MeteoAppConfigPackage');
+      expect(configPkgKt).toContain('BuildConfig.PROD_API_URL');
     });
   });
 });

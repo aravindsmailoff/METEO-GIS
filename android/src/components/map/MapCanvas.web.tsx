@@ -231,15 +231,21 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     }
 
-    // 5. Active Safe / Emergency Route Polyline
+    // 5. Active Safe / Emergency Route Polyline (Amber dashed when Road-Closure Safety Unverified)
     if (activeRouteOverlay && activeRouteOverlay.coordinates.length >= 2) {
       const latLngs = activeRouteOverlay.coordinates.map(
         ([lng, lat]) => [lat, lng] as [number, number]
       );
+      const isUnverified = activeRouteOverlay.closureVerification === 'closure_unverified';
       L.polyline(latLngs, {
-        color: activeRouteOverlay.mode === 'emergency' ? '#38bdf8' : '#10b981',
+        color: isUnverified
+          ? '#f59e0b'
+          : activeRouteOverlay.mode === 'emergency'
+            ? '#38bdf8'
+            : '#10b981',
         weight: 5,
         opacity: 0.95,
+        dashArray: isUnverified ? '8 6' : undefined,
       }).addTo(group);
     }
 

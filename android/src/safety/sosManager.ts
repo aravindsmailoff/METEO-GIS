@@ -98,8 +98,10 @@ let activeInFlightSos: Promise<SosSnapshot> | null = null;
  * Transmits or retries an SOS beacon with single-flight deduplication and strict server verification:
  * - `confirmed_persisted`: HTTP 200 AND `delivered === true` AND `persisted === true` AND non-empty `report_id`
  * - `received_unpersisted`: HTTP 200 AND `delivered === true` AND `persisted === false` (DB unreachable warning surfaced)
- * - `queued_not_delivered`: Network/5xx error AND verified saved in AsyncStorage with `clientRequestId` (NEVER shown as active/delivered!)
- * - `failed`: Validation error (4xx) or storage unavailable
+ * - `queued_not_delivered`: Timeout, network error, 5xx service unavailable, or unconfirmed response AND saved in AsyncStorage
+ * - `failed`: Validation error (4xx) or invalid coordinates / storage unavailable
+ *
+ * Never places automatic phone calls (`Linking.openURL` is invoked ONLY by user tap on `dialEmergencyNumber`).
  */
 export async function submitOrRetrySos(params: {
   latitude: number;
@@ -151,13 +153,21 @@ export async function submitOrRetrySos(params: {
       );
 
       const data = res?.data;
-      if (data && data.delivered === true && typeof data.report_id === 'string' && data.report_id) {
+      if (
+        data &&
+        typeof data === 'object' &&
+        !Array.isArray(data) &&
+        data.delivered === true &&
+        typeof data.report_id === 'string' &&
+        data.report_id.trim().length > 0
+      ) {
+        const cleanReportId = data.report_id.trim();
         await clearPendingSosRecord();
 
         if (data.persisted === true) {
           return {
             status: 'confirmed_persisted',
-            reportId: data.report_id,
+            reportId: cleanReportId,
             alertId: typeof data.alert_id === 'string' ? data.alert_id : null,
             persisted: true,
             clientRequestId,
@@ -171,28 +181,37 @@ export async function submitOrRetrySos(params: {
 
         return {
           status: 'received_unpersisted',
-          reportId: data.report_id,
+          reportId: cleanReportId,
           alertId: null,
           persisted: false,
           clientRequestId,
           message:
             'WARNING — Server received beacon (' +
-            data.report_id +
+            cleanReportId +
             '), but `persisted: false` (emergency database unreachable). Responder delivery is NOT guaranteed — call 112 or 1077 immediately.',
           cancelError: null,
           pendingOfflineRecord: null,
         };
       }
 
-      throw new Error(data?.error || 'Server did not confirm SOS delivery.');
+      throw new Error(
+        (data && typeof data === 'object' && typeof data.error === 'string' && data.error) ||
+          'Malformed or unconfirmed SOS response from emergency server.'
+      );
     } catch (err: any) {
       const httpStatus = err?.response?.status;
-      const errMsg =
-        err?.response?.data?.error ||
-        err?.message ||
-        'Emergency server unreachable — SOS was NOT delivered.';
+      const isTimeout =
+        err?.code === 'ECONNABORTED' ||
+        err?.code === 'ETIMEDOUT' ||
+        /timeout|timed out/i.test(String(err?.message || ''));
 
-      // Non-retryable client error (e.g. 400 / 422)
+      const errMsg = isTimeout
+        ? 'SOS request timed out before server confirmation.'
+        : (typeof err?.response?.data?.error === 'string' && err.response.data.error) ||
+          err?.message ||
+          'Emergency server unreachable — SOS was NOT delivered.';
+
+      // Non-retryable client validation error (e.g. 400 / 422)
       if (typeof httpStatus === 'number' && httpStatus >= 400 && httpStatus < 500) {
         return {
           ...INITIAL_SOS_SNAPSHOT,
@@ -220,8 +239,7 @@ export async function submitOrRetrySos(params: {
           alertId: null,
           persisted: false,
           clientRequestId,
-          message:
-            `NOT DELIVERED — Server unreachable (attempt #${attemptCount}). Saved locally offline for non-duplicate retry. Call 112 or 1077 directly.`,
+          message: `NOT DELIVERED — ${errMsg} (attempt #${attemptCount}). Saved locally offline for non-duplicate retry. Call 112 or 1077 directly.`,
           cancelError: null,
           pendingOfflineRecord: record,
         };
@@ -244,7 +262,7 @@ export async function submitOrRetrySos(params: {
 
 /**
  * Cancels an SOS beacon ONLY when server explicitly confirms `{ cancelled: true }`.
- * Never clears active server beacon state on 502/503 or unconfirmed responses.
+ * Never clears active server beacon state on timeouts, malformed responses, 502/503, or unconfirmed responses.
  */
 export async function cancelConfirmedSos(params: {
   current: SosSnapshot;
@@ -273,7 +291,8 @@ export async function cancelConfirmedSos(params: {
       { report_id: current.reportId },
       { timeout: 5000 }
     );
-    if (res?.status === 200 && res?.data?.cancelled === true) {
+    const body = res?.data;
+    if (res?.status === 200 && body && typeof body === 'object' && body.cancelled === true) {
       await clearPendingSosRecord();
       return {
         ...INITIAL_SOS_SNAPSHOT,
@@ -281,14 +300,25 @@ export async function cancelConfirmedSos(params: {
         message: `SOS ${current.reportId} cancellation confirmed by server.`,
       };
     }
+    const reason =
+      (body && typeof body === 'object' && typeof body.error === 'string' && body.error) ||
+      'Server did not confirm cancellation';
     return {
       ...current,
       cancelError:
-        `Cancellation NOT confirmed (${res?.data?.error || 'DB unreachable'}). ` +
+        `Cancellation NOT confirmed (${reason}). ` +
         `Beacon ${current.reportId} must still be treated as active — call 1077 to confirm all-clear.`,
     };
   } catch (err: any) {
-    const serverReason = err?.response?.data?.error || err?.message || 'Network/DB error';
+    const isTimeout =
+      err?.code === 'ECONNABORTED' ||
+      err?.code === 'ETIMEDOUT' ||
+      /timeout|timed out/i.test(String(err?.message || ''));
+    const serverReason = isTimeout
+      ? 'Request timed out'
+      : (typeof err?.response?.data?.error === 'string' && err.response.data.error) ||
+        err?.message ||
+        'Service unavailable';
     return {
       ...current,
       cancelError:

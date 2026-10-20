@@ -8,26 +8,72 @@ react {
 
 def enableProguardInReleaseBuilds = false
 def jscFlavor = 'org.webkit:android-jsc:+'
-def resolvedProdApiUrl = (
-    project.findProperty("PROD_API_URL") ?: System.getenv("PROD_API_URL") ?: "https://meteo-gis.vercel.app"
-).toString().trim()
+def defaultProdApiUrl = "https://meteo-gis.vercel.app"
+def rawProdApiUrl = project.hasProperty("PROD_API_URL")
+    ? project.property("PROD_API_URL")
+    : (System.getenv("PROD_API_URL") ?: defaultProdApiUrl)
+def resolvedProdApiUrl = (rawProdApiUrl ?: "").toString().trim().replaceAll('/+$', '')
+
+def releaseStoreFile = (project.findProperty("RELEASE_STORE_FILE") ?: System.getenv("RELEASE_STORE_FILE") ?: "").toString().trim()
+def releaseStorePassword = (project.findProperty("RELEASE_STORE_PASSWORD") ?: System.getenv("RELEASE_STORE_PASSWORD") ?: "").toString().trim()
+def releaseKeyAlias = (project.findProperty("RELEASE_KEY_ALIAS") ?: System.getenv("RELEASE_KEY_ALIAS") ?: "").toString().trim()
+def releaseKeyPassword = (project.findProperty("RELEASE_KEY_PASSWORD") ?: System.getenv("RELEASE_KEY_PASSWORD") ?: "").toString().trim()
+def hasReleaseSigningCredentials = (
+    !releaseStoreFile.isEmpty() &&
+    !releaseStorePassword.isEmpty() &&
+    !releaseKeyAlias.isEmpty() &&
+    !releaseKeyPassword.isEmpty()
+)
 
 tasks.register("verifyReleaseApiConfig") {
+    group = "verification"
+    description = "Validates that PROD_API_URL is a valid HTTPS production origin and never uses loopback, emulator, cleartext, or placeholder hosts."
     doLast {
-        if (!resolvedProdApiUrl) {
+        if (resolvedProdApiUrl.isEmpty()) {
             throw new GradleException(
-                "Release build blocked: PROD_API_URL is required (e.g. ./gradlew assembleRelease -PPROD_API_URL=https://api.yourdomain.org)."
+                "Release build blocked: PROD_API_URL cannot be empty."
             )
         }
-        if (!resolvedProdApiUrl.startsWith("https://")) {
+        URI parsedUri
+        try {
+            parsedUri = new URI(resolvedProdApiUrl)
+        } catch (Exception e) {
             throw new GradleException(
-                "Release build blocked: PROD_API_URL must start with https:// (got '${resolvedProdApiUrl}')."
+                "Release build blocked: PROD_API_URL is not a valid URI ('${resolvedProdApiUrl}'): ${e.message}"
             )
         }
-        def lower = resolvedProdApiUrl.toLowerCase()
-        if (lower.contains("10.0.2.2") || lower.contains("127.0.0.1") || lower.contains("localhost") || lower.contains("example.com")) {
+
+        def scheme = (parsedUri.scheme ?: "").toLowerCase()
+        def host = (parsedUri.host ?: "").toLowerCase()
+        def fullLower = resolvedProdApiUrl.toLowerCase()
+
+        if (scheme != "https" || host.isEmpty()) {
             throw new GradleException(
-                "Release build blocked: PROD_API_URL cannot be an emulator, localhost, or placeholder host ('${resolvedProdApiUrl}')."
+                "Release build blocked: PROD_API_URL must be an https:// origin with a valid host (got '${resolvedProdApiUrl}')."
+            )
+        }
+
+        def forbiddenHosts = ["10.0.2.2", "127.0.0.1", "localhost", "0.0.0.0", "::1", "[::1]"]
+        if (forbiddenHosts.any { host == it || host.endsWith(".${it}") }) {
+            throw new GradleException(
+                "Release build blocked: PROD_API_URL cannot target localhost, loopback, or Android emulator hosts ('${resolvedProdApiUrl}')."
+            )
+        }
+
+        def placeholderPatterns = [
+            "example.com",
+            "example.org",
+            "example.net",
+            "placeholder",
+            "your-domain",
+            "yourdomain",
+            "changeme",
+            "<",
+            ">"
+        ]
+        if (placeholderPatterns.any { fullLower.contains(it) }) {
+            throw new GradleException(
+                "Release build blocked: PROD_API_URL contains a placeholder host or token ('${resolvedProdApiUrl}')."
             )
         }
     }
@@ -43,6 +89,15 @@ android {
         buildConfig true
     }
 
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
     defaultConfig {
         applicationId "com.meteogis"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -52,31 +107,48 @@ android {
         buildConfigField "String", "PROD_API_URL", "\"${resolvedProdApiUrl}\""
     }
 
+    packaging {
+        jniLibs {
+            pickFirsts += [
+                "**/libc++_shared.so",
+                "**/libfbjni.so",
+                "**/libjsi.so",
+                "**/libreactnative.so"
+            ]
+        }
+    }
+
     signingConfigs {
-        debug {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
+        if (hasReleaseSigningCredentials) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            // Uses Android Gradle Plugin's auto-generated local ~/.android/debug.keystore (never committed to Git).
         }
         release {
-            // Configure release signing credentials via gradle.properties in production CI;
-            // debug signing fallback enables local smoke verification once -PPROD_API_URL=https://... is supplied.
-            signingConfig signingConfigs.debug
+            // Uses external RELEASE_* credentials when supplied; otherwise builds reproducible app-release-unsigned.apk cleanly without private keys.
+            signingConfig hasReleaseSigningCredentials ? signingConfigs.release : null
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
 }
 
-tasks.whenTaskAdded { task ->
-    if (task.name == "assembleRelease" || task.name == "bundleRelease" || task.name == "mergeReleaseResources") {
+tasks.configureEach { task ->
+    if (
+        task.name == "preReleaseBuild" ||
+        task.name == "assembleRelease" ||
+        task.name == "bundleRelease" ||
+        task.name == "mergeReleaseResources"
+    ) {
         task.dependsOn("verifyReleaseApiConfig")
     }
 }

@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { NativeModules, Platform } from 'react-native';
 import { BaseMapId } from '../types/meteo';
 
 declare const process: { env?: Record<string, string | undefined> } | undefined;
@@ -19,7 +19,14 @@ export const WEBVIEW_ORIGIN_WHITELIST = [
   'http://localhost:3000/*',
 ];
 
+const NATIVE_BUILD_PROD_API_URL: string | undefined =
+  typeof NativeModules?.MeteoAppConfig?.PROD_API_URL === 'string' &&
+  NativeModules.MeteoAppConfig.PROD_API_URL.trim().length > 0
+    ? NativeModules.MeteoAppConfig.PROD_API_URL.trim()
+    : undefined;
+
 const ENV_PROD_API_URL =
+  NATIVE_BUILD_PROD_API_URL ||
   (typeof process !== 'undefined' &&
     (process?.env?.PROD_API_URL ||
       process?.env?.VITE_PROD_API_URL ||
@@ -31,13 +38,25 @@ const ENV_USE_LOCAL_DEV_API =
   (process?.env?.USE_LOCAL_DEV_API === 'true' ||
     process?.env?.VITE_USE_LOCAL_DEV_API === 'true');
 
-const FORBIDDEN_PROD_HOST_PATTERNS = [
+const FORBIDDEN_PROD_HOSTS = [
   '10.0.2.2',
   '127.0.0.1',
   'localhost',
   '0.0.0.0',
+  '::1',
+  '[::1]',
+];
+
+const FORBIDDEN_PROD_PLACEHOLDER_PATTERNS = [
   'example.com',
+  'example.org',
+  'example.net',
   'placeholder',
+  'your-domain',
+  'yourdomain',
+  'changeme',
+  '<',
+  '>',
 ];
 
 export interface ApiValidationResult {
@@ -53,6 +72,15 @@ export function validateApiBaseCandidate(rawUrl: string, isDev: boolean): ApiVal
       valid: false,
       normalizedUrl: '',
       error: 'API base URL is empty.',
+    };
+  }
+
+  const lowerFull = trimmed.toLowerCase();
+  if (!isDev && (lowerFull.includes('<') || lowerFull.includes('>'))) {
+    return {
+      valid: false,
+      normalizedUrl: '',
+      error: `Placeholder token detected in production API URL: "${trimmed}".`,
     };
   }
 
@@ -78,9 +106,8 @@ export function validateApiBaseCandidate(rawUrl: string, isDev: boolean): ApiVal
       };
     }
     if (
-      FORBIDDEN_PROD_HOST_PATTERNS.some(
-        (blocked) => host === blocked || host.endsWith(`.${blocked}`)
-      )
+      FORBIDDEN_PROD_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`)) ||
+      FORBIDDEN_PROD_PLACEHOLDER_PATTERNS.some((pattern) => lowerFull.includes(pattern))
     ) {
       return {
         valid: false,
@@ -226,6 +253,7 @@ export const API_ROUTES = {
   audit: () => `${getApiBase()}/api/live/audit`,
   riskPredict: () => `${getApiBase()}/api/risk/predict`,
   isolation: () => `${getApiBase()}/api/isolation`,
+  roadIncidents: () => `${getApiBase()}/api/roads/incidents`,
   safeRoute: () => `${getApiBase()}/api/routing/safe-route`,
   emergencyRoute: () => `${getApiBase()}/api/routing/emergency-route`,
   sos: () => `${getApiBase()}/api/sos`,

@@ -11,8 +11,7 @@ import axios from 'axios';
 import { API_ROUTES } from '../../../config/api';
 import { useNetworkStatus } from '../../../hooks/useNetworkStatus';
 import {
-  buildHazardExclusions,
-  validateAndParseSafeRoute,
+  fetchVerifiedEvacuationRoute,
 } from '../../../safety/routeSafety';
 import {
   cancelConfirmedSos,
@@ -170,32 +169,9 @@ export const ImpactTab: React.FC<ImpactTabProps> = ({ hazards }) => {
         lat: Number((selectedEvidence.lat + 0.14).toFixed(6)),
         lon: Number((selectedEvidence.lng - 0.12).toFixed(6)),
       };
-      const hazardExclusions = buildHazardExclusions(hazards);
-      const customExclusions = hazardExclusions.map((z) => ({ lat: z.lat, lon: z.lon }));
 
       try {
-        const endpoint =
-          mode === 'emergency' ? API_ROUTES.emergencyRoute() : API_ROUTES.safeRoute();
-        const requestBody =
-          mode === 'emergency'
-            ? {
-                origin,
-                destination,
-                responder_type: 'ambulance',
-                costing: 'emergency',
-                custom_exclusions: customExclusions,
-              }
-            : {
-                origin,
-                destination,
-                costing: 'auto',
-                avoid_disasters: true,
-                custom_exclusions: customExclusions,
-              };
-
-        const res = await axios.post(endpoint, requestBody, { timeout: 7000 });
-        const validated = validateAndParseSafeRoute({
-          raw: res.data,
+        const validated = await fetchVerifiedEvacuationRoute({
           mode,
           origin,
           destination,
@@ -213,17 +189,6 @@ export const ImpactTab: React.FC<ImpactTabProps> = ({ hazards }) => {
 
         setRouteUnavailable(null);
         setActiveRouteOverlay(validated.overlay);
-      } catch (err: any) {
-        setActiveRouteOverlay(null);
-        const serverDetail =
-          err?.response?.data?.message ||
-          err?.response?.data?.error ||
-          err?.message ||
-          'Routing engine is unreachable — safety constraints cannot be verified.';
-        setRouteUnavailable({
-          title: 'Verified Safe Route Unavailable',
-          detail: serverDetail,
-        });
       } finally {
         setRoutingMode(null);
       }
@@ -430,14 +395,35 @@ export const ImpactTab: React.FC<ImpactTabProps> = ({ hazards }) => {
         )}
 
         {activeRouteOverlay && (
-          <View style={styles.routeResult}>
+          <View
+            style={
+              activeRouteOverlay.closureVerification === 'closure_unverified'
+                ? styles.routeUnverifiedResult
+                : styles.routeResult
+            }
+          >
             <View style={{ flex: 1 }}>
-              <Text style={styles.routeTitle}>{activeRouteOverlay.summary}</Text>
+              <Text
+                style={
+                  activeRouteOverlay.closureVerification === 'closure_unverified'
+                    ? styles.routeUnverifiedTitle
+                    : styles.routeTitle
+                }
+              >
+                {activeRouteOverlay.closureVerification === 'closure_unverified'
+                  ? `⚠ ${activeRouteOverlay.summary}`
+                  : `✓ ${activeRouteOverlay.summary}`}
+              </Text>
               <Text style={styles.routeMeta}>
                 Distance: {activeRouteOverlay.distanceKm.toFixed(1)} km · Est. Time:{' '}
                 {Math.round(activeRouteOverlay.durationMin)} min · Vertices:{' '}
                 {activeRouteOverlay.coordinates.length}
               </Text>
+              {activeRouteOverlay.closureWarning && (
+                <Text style={styles.routeUnverifiedWarning}>
+                  {activeRouteOverlay.closureWarning}
+                </Text>
+              )}
             </View>
             <Pressable onPress={() => setActiveRouteOverlay(null)} style={styles.clearRouteBtn}>
               <Text style={styles.clearRouteText}>Clear</Text>
@@ -700,10 +686,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  routeUnverifiedResult: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(120, 53, 15, 0.38)',
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   routeTitle: {
     color: '#6ee7b7',
     fontSize: 12,
     fontWeight: '800',
+  },
+  routeUnverifiedTitle: {
+    color: '#fde68a',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  routeUnverifiedWarning: {
+    color: '#fed7aa',
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 4,
   },
   routeMeta: {
     color: '#cbd5e1',
