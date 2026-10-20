@@ -82,7 +82,7 @@ export const GisLayersSidebar: React.FC<GisLayersSidebarProps> = ({
               : 'text-slate-400 hover:text-slate-300'
           }`}
         >
-          Layers
+          Layer
         </button>
         <button
           onClick={() => setActiveTab('territory')}

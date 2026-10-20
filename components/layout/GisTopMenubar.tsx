@@ -120,10 +120,10 @@ export const GisTopMenubar: React.FC<GisTopMenubarProps> = ({
                 ? 'bg-blue-600/30 text-blue-300 border-blue-500 shadow-sm'
                 : 'bg-slate-900/90 text-slate-300 border-slate-700/80 hover:bg-slate-800 hover:text-white'
             }`}
-            title="Toggle Layers & Territory Sidebar Menu"
+            title="Toggle Layer & Territory Sidebar Menu"
           >
             <Layers size={13} className={isLayersMenuOpen ? 'text-blue-400' : 'text-slate-400'} />
-            <span className="font-bold hidden sm:inline">Layers & Territory</span>
+            <span className="font-bold hidden sm:inline">Layer & Territory</span>
             <span className={`w-1.5 h-1.5 rounded-full ${isLayersMenuOpen ? 'bg-blue-400' : 'bg-slate-500'}`} />
           </button>
         )}
