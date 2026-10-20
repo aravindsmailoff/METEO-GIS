@@ -1,3 +1,4 @@
+import { parseHttpUrl } from '../config/api';
 import { MONITORED_DWR_NETWORK } from '../data/indiaGeoCatalog';
 
 const APPROVED_RADAR_CODES = new Set(
@@ -27,12 +28,14 @@ export function validateAnalyticsBridgeMessage(params: {
     if (currentWindowOrigin) {
       allowedOrigins.add(currentWindowOrigin);
     }
-    try {
-      const parsedTarget = new URL(targetUri, currentWindowOrigin || 'https://meteo-gis.vercel.app');
-      allowedOrigins.add(parsedTarget.origin);
-    } catch {
+    const parsedTarget = parseHttpUrl(
+      targetUri,
+      currentWindowOrigin || 'https://meteo-gis.vercel.app'
+    );
+    if (!parsedTarget) {
       return { valid: false, reason: 'Invalid target URI origin.' };
     }
+    allowedOrigins.add(parsedTarget.origin);
 
     if (!allowedOrigins.has(messageOrigin)) {
       return {

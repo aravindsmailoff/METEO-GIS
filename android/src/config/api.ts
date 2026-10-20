@@ -82,6 +82,67 @@ export interface ApiValidationResult {
   error?: string;
 }
 
+export interface ParsedHttpUrl {
+  protocol: 'http:' | 'https:';
+  hostname: string;
+  port: string;
+  host: string;
+  origin: string;
+  pathname: string;
+}
+
+/**
+ * Pure RFC-3986 HTTP/HTTPS URL parser safe on React Native Hermes without WHATWG URL polyfills.
+ */
+export function parseHttpUrl(rawInput: string, baseOrigin?: string): ParsedHttpUrl | null {
+  if (typeof rawInput !== 'string') return null;
+  let candidate = rawInput.trim();
+  if (!candidate || candidate.includes('\\')) return null;
+
+  if (candidate.startsWith('/')) {
+    if (!baseOrigin) return null;
+    candidate = `${baseOrigin.trim().replace(/\/+$/, '')}${candidate}`;
+  }
+
+  const match = /^(https?):\/\/([^/?#@\s]+)(\/[^?#\s]*)?(?:\?[^#\s]*)?(?:#\S*)?$/i.exec(candidate);
+  if (!match) return null;
+
+  const protocol = `${match[1].toLowerCase()}:` as 'http:' | 'https:';
+  const authority = match[2];
+  const pathname = match[3] || '/';
+
+  let hostname = '';
+  let port = '';
+  const colonIdx = authority.lastIndexOf(':');
+  if (colonIdx !== -1 && !authority.endsWith(']')) {
+    hostname = authority.slice(0, colonIdx).toLowerCase();
+    port = authority.slice(colonIdx + 1);
+    if (!/^\d{1,5}$/.test(port)) return null;
+    const portNum = Number(port);
+    if (portNum < 1 || portNum > 65535) return null;
+  } else {
+    hostname = authority.toLowerCase();
+  }
+
+  if (!hostname) return null;
+
+  const normalizedPort =
+    (protocol === 'http:' && port === '80') || (protocol === 'https:' && port === '443')
+      ? ''
+      : port;
+  const host = normalizedPort ? `${hostname}:${normalizedPort}` : hostname;
+  const origin = `${protocol}//${host}`;
+
+  return {
+    protocol,
+    hostname,
+    port: normalizedPort,
+    host,
+    origin,
+    pathname,
+  };
+}
+
 export function validateApiBaseCandidate(rawUrl: string, isDev: boolean): ApiValidationResult {
   const trimmed = (rawUrl || '').trim().replace(/\/+$/, '');
   if (!trimmed) {
@@ -101,10 +162,8 @@ export function validateApiBaseCandidate(rawUrl: string, isDev: boolean): ApiVal
     };
   }
 
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
+  const parsed = parseHttpUrl(trimmed);
+  if (!parsed) {
     return {
       valid: false,
       normalizedUrl: '',
@@ -112,7 +171,7 @@ export function validateApiBaseCandidate(rawUrl: string, isDev: boolean): ApiVal
     };
   }
 
-  const host = parsed.hostname.toLowerCase();
+  const host = parsed.hostname;
 
   if (!isDev) {
     if (parsed.protocol !== 'https:') {
@@ -293,11 +352,10 @@ export const API_ROUTES = {
   satelliteImagery: (channel: string, nonce: number) =>
     `${getApiBase()}/api/imd/imagery?type=satellite&channel=${encodeURIComponent(channel)}&_t=${nonce}`,
   mobileAnalytics: (params: { state: string; district?: string; lat?: number; lng?: number }) => {
-    const q = new URLSearchParams();
-    q.set('state', params.state || 'All India');
-    if (params.district) q.set('district', params.district);
-    if (typeof params.lat === 'number') q.set('lat', String(params.lat));
-    if (typeof params.lng === 'number') q.set('lng', String(params.lng));
-    return `${getApiBase()}/mobile-analytics?${q.toString()}`;
+    const pairs = [`state=${encodeURIComponent(params.state || 'All India')}`];
+    if (params.district) pairs.push(`district=${encodeURIComponent(params.district)}`);
+    if (typeof params.lat === 'number') pairs.push(`lat=${encodeURIComponent(String(params.lat))}`);
+    if (typeof params.lng === 'number') pairs.push(`lng=${encodeURIComponent(String(params.lng))}`);
+    return `${getApiBase()}/mobile-analytics?${pairs.join('&')}`;
   },
 };
