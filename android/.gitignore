@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build & Bundle outputs
+dist/
+build/
+web-build/
+.expo/
+*.tsbuildinfo
+
+# Native Android build artifacts & local SDK config
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.apk
+*.aab
+*.keystore
+!android/app/debug.keystore
+
+# Logs & Editor files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+.idea/
+.vscode/
