@@ -114,7 +114,8 @@ adb logcat -d > "${PROOF_DIR}/logcat-release.txt"
 
 if [ -z "${REL_VERIFIED}" ]; then
   echo "ERROR: Signed Release APK did not emit [METEOGIS_RUNTIME_VERIFIED] within 70s!"
-  grep -E "AndroidRuntime|ReactNativeJS" "${PROOF_DIR}/logcat-release.txt" | tail -n 45 || true
+  echo "--- ReactNativeJS & Crash/Fatal Logs ---"
+  grep -E "ReactNativeJS|AndroidRuntime|DEBUG|libc|Fatal|MLRN|MapLibre" "${PROOF_DIR}/logcat-release.txt" | tail -n 55 || true
   exit 1
 fi
 
@@ -163,7 +164,7 @@ adb logcat -d > "${PROOF_DIR}/logcat-debug.txt"
 
 if [ -z "${DBG_VERIFIED}" ]; then
   echo "ERROR: Standalone Debug APK failed to boot without Metro!"
-  grep -E "AndroidRuntime|ReactNativeJS" "${PROOF_DIR}/logcat-debug.txt" | tail -n 45 || true
+  grep -E "ReactNativeJS|AndroidRuntime|DEBUG|libc|Fatal|MLRN|MapLibre" "${PROOF_DIR}/logcat-debug.txt" | tail -n 55 || true
   exit 1
 fi
 
