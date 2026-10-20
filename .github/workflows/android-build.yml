@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-      - 'arena/**'
   workflow_dispatch:
 
 concurrency:
@@ -19,7 +18,7 @@ jobs:
   android-verify-and-build:
     name: Typecheck, Safety Suite, RN Bundle & Native Gradle APKs
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -64,7 +63,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Bootstrap & install Android SDK 35/34, Build-Tools 35.0.0, NDK 26.1.10909125 & CMake 3.22.1
+      - name: Ensure Android SDK 35/34, Build-Tools 35.0.0, NDK 26.1.10909125 & CMake 3.22.1
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: '4'
         run: |
           /tmp/ci_exec.sh "Android SDK Setup" bash -c '
             set -euo pipefail
@@ -75,7 +76,6 @@ jobs:
             else
               SDK_ROOT="${HOME}/android-sdk"
               if [ ! -x "${SDK_ROOT}/cmdline-tools/latest/bin/sdkmanager" ]; then
-                echo "Installing official Google Android Command-Line Tools into ${SDK_ROOT}..."
                 if ! command -v unzip >/dev/null 2>&1; then
                   sudo apt-get update -y && sudo apt-get install -y unzip curl
                 fi
@@ -94,25 +94,30 @@ jobs:
 
             echo "ANDROID_HOME=${SDK_ROOT}" >> "${GITHUB_ENV}"
             echo "ANDROID_SDK_ROOT=${SDK_ROOT}" >> "${GITHUB_ENV}"
+            echo "CMAKE_BUILD_PARALLEL_LEVEL=4" >> "${GITHUB_ENV}"
             echo "${SDK_ROOT}/cmdline-tools/latest/bin" >> "${GITHUB_PATH}"
             echo "${SDK_ROOT}/platform-tools" >> "${GITHUB_PATH}"
 
-            yes | sdkmanager --sdk_root="${SDK_ROOT}" --licenses >/dev/null || true
-            sdkmanager --sdk_root="${SDK_ROOT}" --install \
-              "platform-tools" \
-              "platforms;android-35" \
-              "platforms;android-34" \
-              "build-tools;35.0.0" \
-              "ndk;26.1.10909125" \
-              "cmake;3.22.1"
+            MISSING_PKGS=()
+            [ -d "${SDK_ROOT}/platform-tools" ] || MISSING_PKGS+=("platform-tools")
+            [ -d "${SDK_ROOT}/platforms/android-35" ] || MISSING_PKGS+=("platforms;android-35")
+            [ -d "${SDK_ROOT}/platforms/android-34" ] || MISSING_PKGS+=("platforms;android-34")
+            [ -d "${SDK_ROOT}/build-tools/35.0.0" ] || MISSING_PKGS+=("build-tools;35.0.0")
+            [ -d "${SDK_ROOT}/ndk/26.1.10909125" ] || MISSING_PKGS+=("ndk;26.1.10909125")
+            [ -d "${SDK_ROOT}/cmake/3.22.1" ] || MISSING_PKGS+=("cmake;3.22.1")
+
+            if [ "${#MISSING_PKGS[@]}" -gt 0 ]; then
+              yes | sdkmanager --sdk_root="${SDK_ROOT}" --licenses >/dev/null || true
+              sdkmanager --sdk_root="${SDK_ROOT}" --install "${MISSING_PKGS[@]}"
+            fi
 
             printf "sdk.dir=%s\n" "${SDK_ROOT}" > android/android/local.properties
             java -version
-            sdkmanager --sdk_root="${SDK_ROOT}" --list_installed | head -n 30
+            echo "Verified SDK packages at ${SDK_ROOT}: platforms/android-35, build-tools/35.0.0, ndk/26.1.10909125, cmake/3.22.1"
           '
 
       - name: Set up Gradle cache
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
 
       - name: 1. Install web & Android npm dependencies cleanly (npm ci)
         run: /tmp/ci_exec.sh "Step 1 - npm ci" bash -c "set -euo pipefail && npm ci && cd android && npm ci"
@@ -145,15 +150,16 @@ jobs:
 
       - name: 6. Verify Gradle wrapper & version (`./gradlew --version`)
         working-directory: android/android
-        run: /tmp/ci_exec.sh "Step 6 - Gradle Version" ./gradlew --version --no-daemon
+        run: /tmp/ci_exec.sh "Step 6 - Gradle Version" ./gradlew --version
 
       - name: 7. Assemble native Android Debug APK (`./gradlew assembleDebug`)
         working-directory: android/android
         run: |
           /tmp/ci_exec.sh "Step 7 - assembleDebug" bash -c '
             set -euo pipefail
-            ./gradlew assembleDebug --no-daemon --stacktrace
+            ./gradlew assembleDebug --parallel --stacktrace
             ls -lh app/build/outputs/apk/debug/app-debug.apk
+            stat -c "DEBUG_APK_BYTES=%s %n" app/build/outputs/apk/debug/app-debug.apk
             sha256sum app/build/outputs/apk/debug/app-debug.apk
           '
 
@@ -162,8 +168,8 @@ jobs:
         run: |
           /tmp/ci_exec.sh "Step 8 - verifyReleaseApiConfig" bash -c '
             set -euo pipefail
-            ./gradlew verifyReleaseApiConfig --no-daemon
-            ./gradlew verifyReleaseApiConfig -PPROD_API_URL=https://meteo-gis.vercel.app --no-daemon
+            ./gradlew verifyReleaseApiConfig
+            ./gradlew verifyReleaseApiConfig -PPROD_API_URL=https://meteo-gis.vercel.app
 
             for BAD_URL in \
               "http://meteo-gis.vercel.app" \
@@ -172,7 +178,7 @@ jobs:
               "https://127.0.0.1:3000" \
               "https://api.example.com"
             do
-              if ./gradlew verifyReleaseApiConfig "-PPROD_API_URL=${BAD_URL}" --no-daemon >/dev/null 2>&1; then
+              if ./gradlew verifyReleaseApiConfig "-PPROD_API_URL=${BAD_URL}" >/dev/null 2>&1; then
                 echo "ERROR: verifyReleaseApiConfig unexpectedly accepted unsafe URL: ${BAD_URL}"
                 exit 1
               else
@@ -186,8 +192,9 @@ jobs:
         run: |
           /tmp/ci_exec.sh "Step 9 - assembleRelease" bash -c '
             set -euo pipefail
-            ./gradlew assembleRelease -PPROD_API_URL=https://meteo-gis.vercel.app --no-daemon --stacktrace
+            ./gradlew assembleRelease -PPROD_API_URL=https://meteo-gis.vercel.app --parallel --stacktrace
             ls -lh app/build/outputs/apk/release/
+            stat -c "RELEASE_APK_BYTES=%s %n" app/build/outputs/apk/release/*.apk
             sha256sum app/build/outputs/apk/release/*.apk
           '
 
