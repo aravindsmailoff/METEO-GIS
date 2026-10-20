@@ -1,69 +1,71 @@
-# MeteoGIS Android App (`android/`)
+# METEO-GIS Android Application (`React Native 0.76 + MapLibre`)
 
-Production-structured **React Native + MapLibre** Android application for **MeteoGIS — Operational Meteorological & Flood Intelligence (India)**, connected directly to the existing single-port Next.js backend gateway (`http://10.0.2.2:3000/api/*`).
-
-> **Scope isolation:** The existing web application in `app/`, `components/`, and `backend/` remains untouched except for the dedicated fullscreen `app/mobile-analytics/page.tsx` embed page used by the mobile `WebView` Analytics view.
+Isolated native Android companion app for the deployed **METEO-GIS** platform (**`https://meteo-gis.vercel.app`**), built inside `/android` without altering the existing web dashboard or backend code.
 
 ---
 
-## Quick Start (Android Studio Emulator or Physical Android Device)
+## 1. Shared Backend Configuration (`src/config/api.ts`)
 
-### 1. Start the Backend Gateway (Root Folder)
-```bash
-pnpm install
-pnpm dev
-# Runs Next.js API gateway on http://localhost:3000
-```
+All mobile network requests and embedded analytics WebViews route through `src/config/api.ts`:
 
-### 2. Install Mobile Dependencies & Start Metro (`android/`)
+- **Production Default (Debug & Release APKs):** `https://meteo-gis.vercel.app` (`PRODUCTION_API_URL`)
+- **Intentional Local Emulator Dev (Opt-In Only):** `http://10.0.2.2:3000` (`LOCAL_DEV_API_URL`, active only when `USE_LOCAL_DEV_API=true` in development or explicitly selected in **Settings → Emulator :3000**)
+- **Physical Device Local Dev via USB:** `adb reverse tcp:3000 tcp:3000` + **Settings → ADB :3000** (`http://127.0.0.1:3000`)
+- **Cleartext Security Policy (`AndroidManifest.xml` + `res/xml/network_security_config.xml`):**
+  - `android:usesCleartextTraffic="false"` and `<base-config cleartextTrafficPermitted="false" />` enforce HTTPS globally across all external domains.
+  - Cleartext HTTP is restricted strictly to loopback development hosts (`10.0.2.2`, `127.0.0.1`, `localhost`).
+  - Release builds run Gradle task `verifyReleaseApiConfig` to reject missing, non-HTTPS, emulator, or localhost URLs.
+
+---
+
+## 2. Reproducible Build Prerequisites & Commands
+
+### Prerequisites (Host Machine / CI)
+- **Node.js:** `>= 20.x`
+- **JDK:** OpenJDK `17` (`JAVA_HOME` configured)
+- **Android SDK (`ANDROID_HOME` configured):**
+  - Platform `android-35` (`compileSdkVersion 35`, `targetSdkVersion 34`, `minSdkVersion 24`)
+  - Android SDK Build-Tools `35.0.0`
+  - Android NDK `26.1.10909125`
+
+### Install, Typecheck & Run Automated Safety Tests
 ```bash
 cd android
-npm install
-npm start
+npm ci --legacy-peer-deps
+npm run typecheck
+npm test
 ```
 
-### 3. Run in Android Studio / Build APK
-- Open **`android/android`** inside **Android Studio** -> wait for Gradle Sync -> press **Run ▶** on any API 24+ emulator (`10.0.2.2:3000` resolves automatically to host `:3000`), **or** run:
+### Verify Native Android JS Bundles (Debug & Release)
 ```bash
-cd android
-npm run android
+npx react-native bundle \
+  --platform android \
+  --dev false \
+  --entry-file index.js \
+  --bundle-output /tmp/index.android.release.bundle
 ```
-- **Physical Android Phone over USB:**
-```bash
-adb reverse tcp:3000 tcp:3000
-```
-  *(Or enter your PC's LAN URL such as `http://192.168.1.10:3000` inside **Settings -> API Gateway Config** without modifying code.)*
 
-### 4. Browser Simulator Preview (Optional Instant QA)
+### Build Debug & Release APKs with Gradle Wrapper
 ```bash
-cd android
-npm run preview
-# Serves the interactive Pixel 8 Pro / 360dp Small Android / 150% Font Scale harness on port 5173
+cd android/android
+
+# Debug APK (connects to https://meteo-gis.vercel.app by default; switchable in Settings)
+./gradlew assembleDebug
+
+# Release APK (enforces HTTPS PROD_API_URL via verifyReleaseApiConfig)
+./gradlew assembleRelease -PPROD_API_URL=https://meteo-gis.vercel.app
 ```
 
 ---
 
-## Verified API Contract (All via Single Port `:3000`)
+## 3. Deployed Vercel vs. FastAPI Service Dependencies
 
-| Feature | Endpoint | Component / Hook |
+| Next.js Endpoint | Vercel Serverless Standalone Status | Notes & Mobile Handling |
 |---|---|---|
-| Live hazard events & pluvial zones | `GET /api/live/hazards` | `useHazards.ts` (30s poll, 5m TTL cache) |
-| 5-day district warnings | `GET /api/live/warnings` | `useWarnings.ts` (60s poll, 15m TTL cache) |
-| Surface AWS stations & 24h rain | `GET /api/live/stations`, `GET /api/live/rainfall` | `useStations.ts` (120s poll, 2m TTL cache) |
-| ML multi-hazard risk prediction | `POST /api/risk/predict` | `ObsTab.tsx` |
-| Village isolation corridors | `GET /api/isolation` | `ImpactTab.tsx` |
-| Flood-free & NDRF routing | `POST /api/routing/safe-route`, `POST /api/routing/emergency-route` | `ImpactTab.tsx` + `MapCanvas` polyline |
-| Emergency SOS & field reports | `POST /api/sos`, `POST /api/sos/cancel`, `POST /api/citizen/report` | `ImpactTab.tsx` |
-| Provider telemetry & data audit | `GET /api/telemetry`, `GET /api/live/audit`, `GET /api/system/data-status` | `DataTab.tsx`, `SettingsScreen.tsx` |
-| ISRO Bhuvan slippy tiles | `GET /api/bhuvan/wms?z={z}&x={x}&y={y}&layers=...` | `MapCanvas.tsx` |
-| DWR Radar & INSAT-3DR streams | `GET /api/imd/imagery?type=radar...` / `?type=satellite...` | `ImdRadarModal.tsx`, `InsatSatelliteModal.tsx` |
-| Embedded Telemetry Analytics | `GET /mobile-analytics` | `AnalyticsTab.tsx` (`WebView` + 3s SVG fallback) |
-
----
-
-## Non-Overlapping Spatial Rules Enforced
-
-1. **In-Flow Top Chrome (`TopHazardStrip`):** Search bar, `LIVE / HIST` mode toggle, `☰ / ✕` drawer button, and expandable hazard countdown strip occupy dedicated vertical space above the map and **auto-collapse when `BottomSheet === 'full'`**.
-2. **Reserved Collapsed Sheet Clearance (`marginBottom: 56dp`):** The map viewport ends above the `56dp` collapsed sheet handle bar—preventing any overlap with map attribution, zoom buttons, or the bottom-left `Rainfall (24h IMD)` legend.
-3. **Half-Sheet Camera Padding (`paddingBottom: HALF_SHEET_HEIGHT + 16`):** Tapping any marker flies the camera with bottom padding equal to the open half-sheet height so selected districts always sit centered in the visible upper map window.
-4. **Minimum `48dp` Touch Targets & Hardware Back Stack:** Every interactive control meets Android `48dp` accessibility sizing, and hardware Back follows `Modal -> LayerDrawer -> Expanded Top Strip -> Sheet (Full -> Half -> Collapsed) -> Navigation`.
+| `GET /api/live/hazards`, `/warnings`, `/stations`, `/rainfall`, `/nowcast`, `/audit` | Self-contained on Vercel | Checks both `status === 'OK'` and `isLive !== false`; marks unavailable feeds `IMD Feed Unavailable` or `Cached` (`stale`), never `Live`. |
+| `POST /api/risk/predict` | Self-contained on Vercel | Submits `{ rainfall_1h, rainfall_24h }` and displays real `landslide_probability` and `recommended_action`. |
+| `POST /api/routing/safe-route`, `/emergency-route` | Uses `BACKEND_URL` (FastAPI Valhalla) if configured on Vercel; falls back to live OSRM road graph | Mobile strictly validates `recommended_route.geometry` (`>=5` road vertices), `distance_km`, `duration_minutes`, `<=5km` origin/destination snap, and zero intersection with active severe hazards / flood zones. Never invents fallback coordinates. |
+| `POST /api/sos`, `POST /api/sos/cancel` | **Requires FastAPI + PostGIS (`BACKEND_URL` on Vercel)** | Returns `503` if `BACKEND_URL` is unset/unreachable on Vercel, or `persisted: false` if PostGIS is offline. Mobile never fakes an active beacon: stores unsent SOS locally as `NOT DELIVERED`, shows explicit warning, keeps active SOS until `cancelled: true`, and exposes user-initiated `112` / `1077` dialer buttons. |
+| `POST /api/citizen/report` | Stateless gateway receipt on Next.js | Mobile explicitly notes when response is not database-persisted (`persisted !== true`). |
+| `GET /api/isolation`, `/api/landslides/historical` | Uses `BACKEND_URL` if reachable; otherwise returns static reference dataset | Mobile inspects `source === 'static_fallback'` and labels static data transparently. |
+| `GET /mobile-analytics` | Self-contained on Vercel | Embedded `WebView` enforces origin validation + whitelisted IMD DWR station codes on `postMessage`. |

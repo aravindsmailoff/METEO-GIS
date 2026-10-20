@@ -3,6 +3,7 @@ import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 import axios from 'axios';
 import { API_ROUTES } from '../config/api';
 import { OfflineBanner } from '../components/common/OfflineBanner';
+import { SampleDataBanner } from '../components/common/SampleDataBanner';
 import { LayerDrawer } from '../components/drawer/LayerDrawer';
 import { MapCanvas } from '../components/map/MapCanvas';
 import { ImdRadarModal } from '../components/modals/ImdRadarModal';
@@ -68,13 +69,19 @@ export const MapScreen: React.FC = () => {
   useEffect(() => {
     if (operationalMode !== 'HISTORICAL') return;
     axios
-      .get(`${API_ROUTES.hazards().replace('/api/live/hazards', '/api/landslides/historical')}`, {
+      .get(API_ROUTES.historicalLandslides(), {
         timeout: 5000,
       })
       .then((res) => {
-        setHistoricalCount(res.data?.count ?? res.data?.data?.length ?? 42);
+        const count =
+          typeof res.data?.count === 'number'
+            ? res.data.count
+            : Array.isArray(res.data?.data)
+              ? res.data.data.length
+              : null;
+        setHistoricalCount(count);
       })
-      .catch(() => setHistoricalCount(42));
+      .catch(() => setHistoricalCount(null));
   }, [operationalMode]);
 
   const refreshAll = () => {
@@ -101,6 +108,8 @@ export const MapScreen: React.FC = () => {
         onInspectEvent={(ev) => selectHazard(ev)}
       />
 
+      {(hazardsState === 'sample' || hazards.isReferenceSnapshot) && <SampleDataBanner />}
+
       {!isOnline && (
         <OfflineBanner fetchedAt={hazardsFetchedAt} onRetry={refreshAll} />
       )}
@@ -108,7 +117,9 @@ export const MapScreen: React.FC = () => {
       {operationalMode === 'HISTORICAL' && (
         <View style={styles.histBar}>
           <Text style={styles.histText} numberOfLines={1}>
-            📜 Historical Archive Mode · {historicalCount ?? '…'} ISRO/GSI events indexed
+            {historicalCount !== null
+              ? `📜 Historical Archive Mode · ${historicalCount} ISRO/GSI events indexed`
+              : '📜 Historical Archive Mode · Archive feed unavailable'}
           </Text>
           <Pressable
             onPress={() => setOperationalMode('LIVE')}

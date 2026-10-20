@@ -1,3 +1,4 @@
+// @ts-expect-error react-native-web ships untyped CommonJS entry
 export * from 'react-native-web';
 
 export const TurboModuleRegistry = {

@@ -1,0 +1,115 @@
+import fs from 'fs';
+import path from 'path';
+import { describe, expect, it } from 'vitest';
+import {
+  API_ROUTES,
+  LOCAL_DEV_API_URL,
+  PRODUCTION_API_URL,
+  resolveApiBase,
+  setCustomApiBase,
+} from '../config/api';
+import { validateAnalyticsBridgeMessage } from '../safety/webviewBridge';
+
+function collectSourceFiles(dir: string): string[] {
+  const results: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== '__tests__') {
+        results.push(...collectSourceFiles(full));
+      }
+    } else if (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx')) {
+      results.push(full);
+    }
+  }
+  return results;
+}
+
+describe('Phase 3 Vercel Production Configuration, Shared Caller Audit & WebView Security Suite', () => {
+  it('configures shared production URL to `https://meteo-gis.vercel.app` by default across Android while keeping `http://10.0.2.2:3000` strictly opt-in for local dev', () => {
+    setCustomApiBase(null);
+    expect(PRODUCTION_API_URL).toBe('https://meteo-gis.vercel.app');
+    expect(LOCAL_DEV_API_URL).toBe('http://10.0.2.2:3000');
+
+    // Default native Android (both debug and release) connects directly to deployed Vercel HTTPS API
+    expect(resolveApiBase({ isDev: true, platformOs: 'android', useLocalDevApi: false })).toBe(
+      'https://meteo-gis.vercel.app'
+    );
+    expect(resolveApiBase({ isDev: false, platformOs: 'android', useLocalDevApi: false })).toBe(
+      'https://meteo-gis.vercel.app'
+    );
+
+    // Local emulator URL used ONLY when explicitly requested in intentional dev mode
+    expect(resolveApiBase({ isDev: true, platformOs: 'android', useLocalDevApi: true })).toBe(
+      'http://10.0.2.2:3000'
+    );
+    // Even if `useLocalDevApi: true` were left set accidentally, release mode (`isDev: false`) still enforces HTTPS prod!
+    expect(resolveApiBase({ isDev: false, platformOs: 'android', useLocalDevApi: true })).toBe(
+      'https://meteo-gis.vercel.app'
+    );
+  });
+
+  it('verifies every single route in `API_ROUTES` has >= 1 caller in `android/src` and no file hardcodes rogue `localhost` or `10.0.2.2` URLs outside `config/api.ts`', () => {
+    const srcRoot = path.resolve(__dirname, '..');
+    const files = collectSourceFiles(srcRoot);
+    const combinedExceptConfig = files
+      .filter((f) => !f.endsWith(path.join('config', 'api.ts')))
+      .map((f) => fs.readFileSync(f, 'utf-8'))
+      .join('\n');
+
+    // Zero hardcoded localhost/emulator calls outside `config/api.ts` (except UI display labels in SettingsScreen)
+    for (const file of files) {
+      if (
+        file.endsWith(path.join('config', 'api.ts')) ||
+        file.endsWith('SettingsScreen.tsx')
+      ) {
+        continue;
+      }
+      const text = fs.readFileSync(file, 'utf-8');
+      expect(text).not.toContain('10.0.2.2');
+      expect(text).not.toContain('http://localhost');
+    }
+
+    // Every single exported route builder in `API_ROUTES` is actively called in `android/src`
+    for (const routeKey of Object.keys(API_ROUTES)) {
+      expect(combinedExceptConfig).toContain(`API_ROUTES.${routeKey}`);
+    }
+  });
+
+  it('validates WebView `postMessage` bridge origins and whitelisted IMD radar stations strictly', () => {
+    const targetUri =
+      'https://meteo-gis.vercel.app/mobile-analytics?state=Tamil+Nadu&district=Chennai';
+
+    // Valid Vercel origin + valid DWR station
+    const okMsg = validateAnalyticsBridgeMessage({
+      rawData: JSON.stringify({ type: 'OPEN_RADAR', stationCode: 'KKL' }),
+      messageOrigin: 'https://meteo-gis.vercel.app',
+      targetUri,
+    });
+    expect(okMsg).toEqual({ valid: true, type: 'OPEN_RADAR', stationCode: 'kkl' });
+
+    // Cross-origin attacker rejected
+    const badOrigin = validateAnalyticsBridgeMessage({
+      rawData: JSON.stringify({ type: 'OPEN_RADAR', stationCode: 'kkl' }),
+      messageOrigin: 'https://attacker.evil.org',
+      targetUri,
+    });
+    expect(badOrigin.valid).toBe(false);
+
+    // Unapproved station code rejected
+    const badStation = validateAnalyticsBridgeMessage({
+      rawData: JSON.stringify({ type: 'OPEN_RADAR', stationCode: '../../etc/passwd' }),
+      messageOrigin: 'https://meteo-gis.vercel.app',
+      targetUri,
+    });
+    expect(badStation.valid).toBe(false);
+
+    // Unsupported message type rejected
+    const badType = validateAnalyticsBridgeMessage({
+      rawData: JSON.stringify({ type: 'EXEC_CMD', stationCode: 'kkl' }),
+      messageOrigin: 'https://meteo-gis.vercel.app',
+      targetUri,
+    });
+    expect(badType.valid).toBe(false);
+  });
+});

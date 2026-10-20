@@ -34,28 +34,53 @@ export function useSelection(cachedStations: ValidatedStationObservation[] = [])
   const enrichWithLiveStation = useCallback(
     async (base: SelectedLocationEvidence): Promise<SelectedLocationEvidence> => {
       try {
-        const res = await axios.get(API_ROUTES.stations(), {
-          params: { lat: base.lat, lng: base.lng, max_distance_km: 150 },
-          timeout: 3500,
-        });
-        const nearest = res.data?.nearestStation || res.data?.nearestStationAnyDistance;
-        if (nearest && typeof nearest.temperatureC === 'number') {
-          return {
-            ...base,
-            temperatureC: nearest.temperatureC,
-            humidityPercent: nearest.humidityPercent ?? base.humidityPercent,
-            windSpeedKmh: nearest.windSpeedKmh ?? base.windSpeedKmh,
-            windDirectionDeg: nearest.windDirectionDeg ?? base.windDirectionDeg,
-            pressureHpa: nearest.pressureHpa ?? base.pressureHpa,
-            rainfall1hMm: nearest.rainfall1hMm ?? base.rainfall1hMm,
-            rainfall24hMm: nearest.rainfall24hMm ?? base.rainfall24hMm,
-            stationName: nearest.stationName || base.stationName,
-            stationDistanceKm:
-              res.data?.distanceKm ??
-              haversineKm(base.lat, base.lng, nearest.latitude, nearest.longitude),
-            observationTimestampIST: nearest.observationTimestampIST || base.observationTimestampIST,
-          };
+        const [stnOutcome, nowcastOutcome] = await Promise.allSettled([
+          axios.get(API_ROUTES.stations(), {
+            params: { lat: base.lat, lng: base.lng, max_distance_km: 150 },
+            timeout: 3500,
+          }),
+          axios.get(API_ROUTES.nowcast(), {
+            params: { district: base.district, state: base.state },
+            timeout: 3500,
+          }),
+        ]);
+
+        let updated = { ...base };
+
+        if (stnOutcome.status === 'fulfilled') {
+          const res = stnOutcome.value;
+          const nearest = res.data?.nearestStation || res.data?.nearestStationAnyDistance;
+          if (nearest && typeof nearest.temperatureC === 'number') {
+            updated = {
+              ...updated,
+              temperatureC: nearest.temperatureC,
+              humidityPercent: nearest.humidityPercent ?? updated.humidityPercent,
+              windSpeedKmh: nearest.windSpeedKmh ?? updated.windSpeedKmh,
+              windDirectionDeg: nearest.windDirectionDeg ?? updated.windDirectionDeg,
+              pressureHpa: nearest.pressureHpa ?? updated.pressureHpa,
+              rainfall1hMm: nearest.rainfall1hMm ?? updated.rainfall1hMm,
+              rainfall24hMm: nearest.rainfall24hMm ?? updated.rainfall24hMm,
+              stationName: nearest.stationName || updated.stationName,
+              stationDistanceKm:
+                res.data?.distanceKm ??
+                haversineKm(base.lat, base.lng, nearest.latitude, nearest.longitude),
+              observationTimestampIST:
+                nearest.observationTimestampIST || updated.observationTimestampIST,
+            };
+          }
         }
+
+        if (nowcastOutcome.status === 'fulfilled') {
+          const nowcasts = nowcastOutcome.value.data?.nowcasts;
+          if (Array.isArray(nowcasts) && nowcasts.length > 0 && nowcasts[0]?.message) {
+            updated = {
+              ...updated,
+              summary: `${updated.summary} · IMD Nowcast: ${nowcasts[0].message}`,
+            };
+          }
+        }
+
+        return updated;
       } catch {
         // Keep fast local estimate seamlessly when offline or low bandwidth
       }

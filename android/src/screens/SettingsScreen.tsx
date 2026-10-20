@@ -9,7 +9,17 @@ import {
   View,
 } from 'react-native';
 import axios from 'axios';
-import { API_ROUTES, DEFAULT_ANDROID_DEV_API, getApiBase } from '../config/api';
+import {
+  ADB_REVERSE_DEV_API_URL,
+  APPROVED_DEV_CLEARTEXT_HOSTS,
+  API_ROUTES,
+  DEFAULT_ANDROID_DEV_API,
+  getApiBase,
+  getApiConfigError,
+  IS_DEV_RUNTIME,
+  LOCAL_DEV_API_URL,
+  PRODUCTION_API_URL,
+} from '../config/api';
 import { QUICK_STATES } from '../data/indiaGeoCatalog';
 import { useAppStore } from '../store/appStore';
 import { clearAllFeedCache, listCacheMetadata } from '../utils/cache';
@@ -129,23 +139,68 @@ export const SettingsScreen: React.FC = () => {
         {notifFeedback && <Text style={styles.infoNote}>{notifFeedback}</Text>}
       </View>
 
-      {/* 3. Single-Port Next.js API Gateway Config */}
+      {/* 3. Shared Production Vercel & Intentional Local Dev API Config */}
       <View style={styles.card}>
-        <Text style={styles.cardHeading}>API GATEWAY CONFIG (SINGLE PORT :3000)</Text>
+        <Text style={styles.cardHeading}>SHARED BACKEND GATEWAY CONFIG</Text>
         <Text style={styles.rowDesc}>
-          Active Base URL: {getApiBase() || '(Relative Web Proxy → :3000)'} (Android Emulator default:{' '}
-          {DEFAULT_ANDROID_DEV_API})
+          Active Base URL:{' '}
+          {getApiConfigError()
+            ? `INVALID (${getApiConfigError()})`
+            : getApiBase() || `(Web Proxy → ${PRODUCTION_API_URL})`}
+          {'\n'}Production Default: {PRODUCTION_API_URL} · Local Dev Loopback Only:{' '}
+          {APPROVED_DEV_CLEARTEXT_HOSTS.join(', ')}
         </Text>
+        {IS_DEV_RUNTIME && (
+          <View style={styles.btnRow}>
+            <Pressable
+              onPress={async () => {
+                setApiInput(PRODUCTION_API_URL);
+                await updateCustomApiUrl('');
+                setGatewayHealthMsg(`✓ Using deployed Vercel gateway (${PRODUCTION_API_URL}).`);
+              }}
+              style={[styles.secondaryBtn, { flex: 1 }]}
+            >
+              <Text style={styles.btnText}>🌐 Vercel Prod</Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => {
+                setApiInput(LOCAL_DEV_API_URL);
+                await updateCustomApiUrl(LOCAL_DEV_API_URL);
+                setGatewayHealthMsg(`✓ Switched to Local Emulator Dev (${LOCAL_DEV_API_URL}).`);
+              }}
+              style={[styles.secondaryBtn, { flex: 1 }]}
+            >
+              <Text style={styles.btnText}>🛠 Emulator :3000</Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => {
+                setApiInput(ADB_REVERSE_DEV_API_URL);
+                await updateCustomApiUrl(ADB_REVERSE_DEV_API_URL);
+                setGatewayHealthMsg(`✓ Switched to ADB Reverse (${ADB_REVERSE_DEV_API_URL}).`);
+              }}
+              style={[styles.secondaryBtn, { flex: 1 }]}
+            >
+              <Text style={styles.btnText}>🔌 ADB :3000</Text>
+            </Pressable>
+          </View>
+        )}
         <View style={styles.inputRow}>
           <TextInput
             value={apiInput}
             onChangeText={setApiInput}
-            placeholder="Optional LAN override (e.g. http://192.168.1.10:3000)"
+            placeholder="HTTPS URL or adb reverse http://127.0.0.1:3000"
             placeholderTextColor="#64748b"
             style={styles.input}
           />
           <Pressable
-            onPress={() => updateCustomApiUrl(apiInput)}
+            onPress={async () => {
+              const res = await updateCustomApiUrl(apiInput);
+              setGatewayHealthMsg(
+                res.ok
+                  ? '✓ Saved validated API gateway base URL.'
+                  : `✗ Rejected: ${res.error || 'Unsafe URL'}`
+              );
+            }}
             style={styles.primaryBtn}
           >
             <Text style={styles.btnText}>Save</Text>
@@ -179,23 +234,27 @@ export const SettingsScreen: React.FC = () => {
           />
         </Pressable>
 
-        <Pressable
-          onPress={() => setUseReferenceFallback(!useReferenceFallback)}
-          style={styles.switchRow}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.rowTitle}>Reference Snapshot When Upstream IMD Offline</Text>
-            <Text style={styles.rowDesc}>
-              Turn OFF to inspect pure Empty / Stale state if external IMD GeoServer is blocked
-            </Text>
-          </View>
-          <Switch
-            value={useReferenceFallback}
-            onValueChange={setUseReferenceFallback}
-            trackColor={{ false: '#334155', true: '#0284c7' }}
-            thumbColor={useReferenceFallback ? '#ffffff' : '#94a3b8'}
-          />
-        </Pressable>
+        {IS_DEV_RUNTIME && (
+          <Pressable
+            onPress={() => setUseReferenceFallback(!useReferenceFallback)}
+            style={styles.switchRow}
+          >
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rowTitle}>
+                QA Sample Fixture Mode (DEV ONLY — NOT LIVE DATA)
+              </Text>
+              <Text style={styles.rowDesc}>
+                Disabled by default (`false`). Shows purple SAMPLE / NOT LIVE banner and never overwrites cached official feeds. Locked OFF in release builds.
+              </Text>
+            </View>
+            <Switch
+              value={useReferenceFallback}
+              onValueChange={setUseReferenceFallback}
+              trackColor={{ false: '#334155', true: '#a21caf' }}
+              thumbColor={useReferenceFallback ? '#ffffff' : '#94a3b8'}
+            />
+          </Pressable>
+        )}
 
         <View style={styles.cacheBox}>
           <Text style={styles.rowTitle}>

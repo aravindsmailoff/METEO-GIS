@@ -1,4 +1,11 @@
-export type DataState = 'loading' | 'success' | 'stale' | 'error' | 'offline' | 'empty';
+export type DataState =
+  | 'loading'
+  | 'success'
+  | 'stale'
+  | 'error'
+  | 'offline'
+  | 'empty'
+  | 'sample';
 
 export interface CachedPayload<T> {
   data: T;
@@ -125,6 +132,7 @@ export interface UserSegmentation {
 
 export interface HazardsPayload {
   status: string;
+  isLive?: boolean;
   events: DerivedHazardEvent[];
   pluvialFloodZones: PluvialFloodZone[];
   counts: HazardCounts;

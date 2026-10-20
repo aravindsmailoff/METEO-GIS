@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import axios from 'axios';
-import { API_ROUTES } from '../config/api';
+import { API_ROUTES, IS_DEV_RUNTIME } from '../config/api';
 import { buildReferenceHazardsPayload } from '../data/indiaGeoCatalog';
+import { resolveFeedOutcome } from '../safety/feedIntegrity';
 import { useAppStore } from '../store/appStore';
 import { DataState, HazardsPayload } from '../types/meteo';
 import { FEED_TTL, isCacheStale, readCache, writeCache } from '../utils/cache';
@@ -25,6 +27,7 @@ const EMPTY_HAZARDS: HazardsPayload = {
     citizensInRedZones: 0,
     totalPersonsAtRisk: 0,
   },
+  isReferenceSnapshot: false,
 };
 
 export function useHazards() {
@@ -38,11 +41,20 @@ export function useHazards() {
   const [fetchedAt, setFetchedAt] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const abortRef = useRef<AbortController | null>(null);
+  const failureStreakRef = useRef<number>(0);
+
   const cacheKey = `hazards:${selectedState}`;
 
   const load = useCallback(
     async (forceFresh = false) => {
-      const cached = await readCache<HazardsPayload>(cacheKey);
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+
+      const rawCached = await readCache<HazardsPayload>(cacheKey);
+      const cached =
+        rawCached && !rawCached.data?.isReferenceSnapshot ? rawCached : null;
 
       if (!isOnline) {
         if (cached) {
@@ -72,46 +84,56 @@ export function useHazards() {
         const res = await axios.get<HazardsPayload>(API_ROUTES.hazards(), {
           params,
           timeout: 8000,
+          signal: controller.signal,
         });
 
         const payload = res.data;
-        const hasRealEvents =
-          payload &&
-          payload.status === 'OK' &&
-          ((payload.events && payload.events.length > 0) ||
-            (payload.pluvialFloodZones && payload.pluvialFloodZones.length > 0));
+        const hasLiveItems = Boolean(
+          (payload?.events && payload.events.length > 0) ||
+            (payload?.pluvialFloodZones && payload.pluvialFloodZones.length > 0)
+        );
 
-        if (hasRealEvents) {
-          const saved = await writeCache(cacheKey, payload, 'api/live/hazards', FEED_TTL.hazards);
+        const outcome = resolveFeedOutcome<HazardsPayload>({
+          upstreamPayload: payload,
+          hasLiveItems,
+          cached,
+          emptyPayload: EMPTY_HAZARDS,
+          buildSamplePayload: () => buildReferenceHazardsPayload(selectedState),
+          isDev: IS_DEV_RUNTIME,
+          qaSampleOptIn: useReferenceFallback,
+        });
+
+        failureStreakRef.current = outcome.dataState === 'error' ? failureStreakRef.current + 1 : 0;
+
+        if (outcome.shouldPersistToCache) {
+          const saved = await writeCache(
+            cacheKey,
+            outcome.payload,
+            'api/live/hazards',
+            FEED_TTL.hazards
+          );
           setData(saved.data);
           setFetchedAt(saved.fetchedAt);
-          setErrorMessage(null);
-          setDataState('success');
-          return;
+        } else {
+          setData(outcome.payload);
+          setFetchedAt(outcome.dataState === 'stale' && cached ? cached.fetchedAt : Date.now());
         }
 
-        // Upstream IMD GeoServer unavailable or returned 0 items
-        if (useReferenceFallback) {
-          const fallback = buildReferenceHazardsPayload(selectedState);
-          const saved = await writeCache(cacheKey, fallback, 'api/live/hazards', FEED_TTL.hazards);
-          setData(saved.data);
-          setFetchedAt(saved.fetchedAt);
-          setErrorMessage(null);
-          setDataState(fallback.events.length === 0 ? 'empty' : 'success');
-          return;
-        }
-
-        if (cached) {
-          setData(cached.data);
-          setFetchedAt(cached.fetchedAt);
-          setDataState('stale');
-          return;
-        }
-
-        setData(EMPTY_HAZARDS);
-        setFetchedAt(Date.now());
-        setDataState('empty');
+        setErrorMessage(outcome.errorMessage);
+        setDataState(outcome.dataState);
       } catch (err: any) {
+        if (controller.signal.aborted) return;
+        failureStreakRef.current += 1;
+
+        if (IS_DEV_RUNTIME && useReferenceFallback) {
+          const sample = { ...buildReferenceHazardsPayload(selectedState), isReferenceSnapshot: true };
+          setData(sample);
+          setFetchedAt(Date.now());
+          setErrorMessage(null);
+          setDataState('sample');
+          return;
+        }
+
         if (cached) {
           setData(cached.data);
           setFetchedAt(cached.fetchedAt);
@@ -126,9 +148,30 @@ export function useHazards() {
   );
 
   useEffect(() => {
-    load(false);
-    const pollId = setInterval(() => load(false), 30000); // Spec Section 7: 30s interval
-    return () => clearInterval(pollId);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const scheduleNext = () => {
+      const backoffFactor = Math.min(4, Math.pow(2, failureStreakRef.current));
+      const delayMs = 30000 * backoffFactor;
+      timer = setTimeout(async () => {
+        if (cancelled) return;
+        if (!AppState.currentState || AppState.currentState === 'active') {
+          await load(false);
+        }
+        if (!cancelled) scheduleNext();
+      }, delayMs);
+    };
+
+    load(false).finally(() => {
+      if (!cancelled) scheduleNext();
+    });
+
+    return () => {
+      cancelled = true;
+      abortRef.current?.abort();
+      if (timer) clearTimeout(timer);
+    };
   }, [load, refreshNonce]);
 
   useEffect(() => {
