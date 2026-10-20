@@ -19,8 +19,10 @@ sudo chmod 666 /dev/kvm || true
 SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
 export ANDROID_HOME="${SDK_ROOT}"
 export ANDROID_SDK_ROOT="${SDK_ROOT}"
+export ANDROID_AVD_HOME="${HOME}/.android/avd"
 export ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL=5
 export PATH="${SDK_ROOT}/cmdline-tools/latest/bin:${SDK_ROOT}/emulator:${SDK_ROOT}/platform-tools:${PATH}"
+mkdir -p "${ANDROID_AVD_HOME}"
 
 echo "=== 2. Provisioning Android 14 (API 34 google_apis x86_64) System Image ==="
 yes | sdkmanager --sdk_root="${SDK_ROOT}" --licenses >/dev/null || true
@@ -33,8 +35,16 @@ sdkmanager --sdk_root="${SDK_ROOT}" --install \
 echo "no" | avdmanager create avd \
   -n meteogis_api34 \
   -k "system-images;android-34;google_apis;x86_64" \
+  -p "${ANDROID_AVD_HOME}/meteogis_api34.avd" \
   --device "pixel_6" \
   --force
+
+if [ -d "${HOME}/.config/.android/avd" ] && [ ! -f "${ANDROID_AVD_HOME}/meteogis_api34.ini" ]; then
+  cp -rf "${HOME}/.config/.android/avd/"* "${ANDROID_AVD_HOME}/" || true
+fi
+
+echo "Registered AVDs:"
+"${SDK_ROOT}/emulator/emulator" -list-avds
 
 adb start-server
 
