@@ -1,0 +1,42 @@
+name: ⚡ Ultra-Fast 50 E2E Tests (< 5s SLA)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-test:
+    name: ⚡ Run 50 E2E Tests (< 5s SLA)
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12.8.1
+
+      - name: 🟢 Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: 📥 Install Dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: ⚡ Execute 50 E2E Tests (< 5s SLA)
+        run: pnpm run test:e2e
+        env:
+          CI: true
+          NODE_ENV: test
