@@ -43,7 +43,7 @@ else
     curl -L --retry 3 --retry-delay 5 -o "${PBF_FILE}" "${PBF_URL}"
 fi
 
-# Step 3: Validate downloaded PBF file
+# Step 3: Validate downloaded PBF integrity
 echo "[3/8] Validating downloaded PBF integrity..."
 if [ ! -s "${PBF_FILE}" ]; then
     echo "ERROR: Downloaded PBF file is empty or missing!" >&2

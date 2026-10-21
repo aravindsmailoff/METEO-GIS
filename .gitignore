@@ -1,10 +1,10 @@
 # Dependencies
-/node_modules
+node_modules/
 /.pnp
 .pnp.js
 
 # Build and Production
-/.next/
+.next/
 /out/
 build
 dist
@@ -54,3 +54,4 @@ __v0_jsx-dev-runtime.ts
 .snowflake/
 .v0-trash/
 .vercel/
+.expo/
