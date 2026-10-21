@@ -1035,6 +1035,9 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
           slopeDeg: calculatedSlope,
           isLowLying: false,
           drainageContext: `${district} Regional Hydrological Catchment`,
+          arrivalCountdownMin: (isRadarAvailable && ((rain1h !== null && rain1h > 0) || matchingNowcast?.isSevere || matchingWarning?.isWarningActive))
+            ? Math.max(12, Math.min(55, Math.round((Math.max(10, minRadarDist * 0.35) / 32) * 60)))
+            : null,
           stationTelemetry: {
             stationId: nearestStn?.id || nearestStn?.stationCode || 'ISRO-NASA-SAT',
             stationName: nearestStn?.stationName || `${district} Satellite Grid`,
@@ -1789,19 +1792,20 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
       });
     }
 
-    const formatCountdown = (epochMs?: number, category?: string) => {
-      let targetMs = epochMs;
-      const now = Date.now();
-      if (!targetMs || targetMs <= now) {
-        const hoursAhead = category === 'CYCLONE' ? 12 : category === 'CLOUDBURST' ? 1 : 3;
-        targetMs = now + hoursAhead * 3600 * 1000;
+    // Authentic Doppler Weather Radar & Convective Nowcast Badge Resolver
+    const formatHazardMapBadge = (h: any) => {
+      const cd = getHazardCountdownDetails(h, Date.now());
+      if (!cd.isCountdownActive) {
+        return 'ALL CLEAR · DWR SURVEILLANCE';
       }
-      const diffSec = Math.max(60, Math.floor((targetMs - now) / 1000));
-      const hrs = Math.floor(diffSec / 3600);
-      const mins = Math.floor((diffSec % 3600) / 60);
-      const secs = diffSec % 60;
-      if (hrs > 0) return `${hrs}h ${String(mins).padStart(2, '0')}m remaining`;
-      return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      if (cd.countdownType === 'IMPACT_ETA') {
+        const hrsPart = cd.hrs > 0 ? `${cd.hrs}h ` : '';
+        return `ETA: ${hrsPart}${cd.mins}m ${cd.secs}s`;
+      }
+      if (cd.countdownType === 'CORE_LIFESPAN') {
+        return `CORE: ${cd.mins}m ${cd.secs}s`;
+      }
+      return `${cd.hrs > 0 ? `${cd.hrs}h ` : ''}${String(cd.mins).padStart(2, '0')}m ${String(cd.secs).padStart(2, '0')}s`;
     };
 
     // 8. SEVERE WEATHER & CONVECTIVE HAZARD LAYER (Very Heavy Rain, Thunderstorms, Severe Weather, Cyclones)
@@ -1854,7 +1858,7 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
                     <div style="width: 20px; height: 20px; border-radius: 50%; background: #1c1917; border: 1.5px solid ${pinColor}; display: flex; align-items: center; justify-content: center; font-size: 10px;">${emoji}</div>
                     <span style="font-size: 10.5px; font-weight: 700; color: #ffffff;">${titleLabel}</span>
                     <span style="background: ${pinColor}25; color: ${pinColor}; font-family: monospace; font-size: 9px; font-weight: 800; padding: 1px 4px; border-radius: 4px; border: 1px solid ${pinColor}55;">
-                      ${formatCountdown(h.validUntilEpoch, h.category)}
+                      ${formatHazardMapBadge(h)}
                     </span>
                   </div>
                 `,
@@ -1900,7 +1904,7 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
                     <div style="width: 20px; height: 20px; border-radius: 50%; background: #082f49; border: 1.5px solid #06b6d4; display: flex; align-items: center; justify-content: center; font-size: 10px;">🧊</div>
                     <span style="font-size: 10.5px; font-weight: 700; color: #ffffff;">Active Hailstorm Alert</span>
                     <span style="background: rgba(6,182,212,0.25); color: #06b6d4; font-family: monospace; font-size: 9px; font-weight: 800; padding: 1px 4px; border-radius: 4px; border: 1px solid rgba(6,182,212,0.45);">
-                      ${formatCountdown(h.validUntilEpoch)}
+                      ${formatHazardMapBadge(h)}
                     </span>
                   </div>
                 `,
@@ -2305,37 +2309,91 @@ export const UnifiedHazardMap: React.FC<UnifiedHazardMapProps> = ({
                   flexShrink: 0,
                 }}
               />
-              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
-                <div
-                  style={{
-                    fontSize: 9,
-                    fontWeight: 900,
-                    textTransform: 'uppercase',
-                    letterSpacing: 0.8,
-                    color: hudTitleColor,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  <span>{hudCd.hazardTitle}</span>
-                  <span style={{ color: '#94a3b8' }}>·</span>
-                  <span style={{ color: '#fff' }}>{primaryHudEvent.district}</span>
-                </div>
-                <div
-                  style={{
-                    fontSize: 15,
-                    fontWeight: 900,
-                    fontFamily: 'monospace',
-                    color: '#ffffff',
-                    letterSpacing: 0.8,
-                    marginTop: 2,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {hudCd.formatted}
-                </div>
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.2 }}>
+                {hudCd.isCountdownActive ? (
+                  <>
+                    <div
+                      style={{
+                        fontSize: 9.5,
+                        fontWeight: 900,
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.8,
+                        color: hudTitleColor,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span>{hudCd.hazardBadge}</span>
+                      <span style={{ color: '#64748b' }}>·</span>
+                      <span style={{ color: '#fff' }}>{primaryHudEvent.district}</span>
+                      <span
+                        style={{
+                          fontSize: 8.5,
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          background: hudCd.countdownType === 'IMPACT_ETA' ? 'rgba(6,182,212,0.2)' : 'rgba(239,68,68,0.2)',
+                          border: `1px solid ${hudCd.countdownType === 'IMPACT_ETA' ? 'rgba(6,182,212,0.5)' : 'rgba(239,68,68,0.5)'}`,
+                          color: hudCd.countdownType === 'IMPACT_ETA' ? '#67e8f9' : '#fca5a5',
+                          fontFamily: 'monospace',
+                          fontWeight: 800,
+                        }}
+                      >
+                        {hudCd.countdownType === 'IMPACT_ETA' ? 'IMPACT ETA' : hudCd.countdownType === 'CORE_LIFESPAN' ? 'CORE LIFESPAN' : 'IMD 0-3H NOWCAST'}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 16,
+                        fontWeight: 900,
+                        fontFamily: 'monospace',
+                        color: '#ffffff',
+                        letterSpacing: 0.8,
+                        marginTop: 2,
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span style={{ color: hudCd.colorScheme === 'red' ? '#f87171' : hudCd.colorScheme === 'purple' ? '#c084fc' : '#fbbf24' }}>
+                        {hudCd.formatted}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 8.5,
+                        color: '#94a3b8',
+                        fontFamily: 'monospace',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        marginTop: 3,
+                        paddingTop: 3,
+                        borderTop: '1px solid rgba(255,255,255,0.08)',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      <span>📡 {hudCd.radarName.split(' ')[0]} ({hudCd.radarDistKm} km @ {hudCd.reflectivityDbz} dBZ)</span>
+                      <span style={{ color: '#475569' }}>|</span>
+                      <span>🛰️ INSAT-3DR: {hudCd.insatCloudTopTempC}°C</span>
+                      <span style={{ color: '#475569' }}>|</span>
+                      <span style={{ color: '#38bdf8' }}>{hudCd.nowcastValidUntilIST}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 9.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: 0.8, color: '#34d399', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>🛡️ ALL CLEAR · DWR SURVEILLANCE</span>
+                      <span style={{ color: '#64748b' }}>·</span>
+                      <span style={{ color: '#fff' }}>{primaryHudEvent.district}</span>
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 800, fontFamily: 'monospace', color: '#10b981', marginTop: 2 }}>
+                      NO CONVECTIVE CELLS (Z &lt; 20 dBZ)
+                    </div>
+                    <div style={{ fontSize: 8.5, color: '#94a3b8', fontFamily: 'monospace', marginTop: 2 }}>
+                      📡 {hudCd.radarName} Active · INSAT-3DR Clear Atmosphere
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}

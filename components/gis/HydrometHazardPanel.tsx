@@ -31,6 +31,7 @@ import {
   Cell 
 } from 'recharts';
 import { DerivedHazardEvent, PluvialFloodZone, FocusHazardCategory } from '@/app/api/live/hazards/route';
+import { getHazardCountdownDetails } from '@/lib/hazardCountdown';
 
 interface HydrometHazardPanelProps {
   events: DerivedHazardEvent[];
@@ -92,21 +93,20 @@ export const HydrometHazardPanel: React.FC<HydrometHazardPanelProps> = ({
     return () => clearInterval(id);
   }, []);
 
-  // Format dynamic countdown timer (seamless operational rollover)
-  const formatCountdown = (validUntilEpoch?: number) => {
-    let targetMs = validUntilEpoch;
-    const now = currentTimeMs;
-    if (!targetMs || targetMs <= now) {
-      targetMs = now + 3 * 3600 * 1000;
+  // Authentic Doppler Weather Radar & Convective Nowcast Countdown
+  const formatCountdown = (hazardObj?: any) => {
+    const cd = getHazardCountdownDetails(hazardObj, currentTimeMs);
+    if (!cd.isCountdownActive) {
+      return 'SURVEILLANCE ACTIVE';
     }
-    const diffSec = Math.max(60, Math.floor((targetMs - now) / 1000));
-    const hours = Math.floor(diffSec / 3600);
-    const minutes = Math.floor((diffSec % 3600) / 60);
-    const seconds = diffSec % 60;
-    if (hours > 0) {
-      return `${hours}h ${String(minutes).padStart(2, '0')}m remaining`;
+    if (cd.countdownType === 'IMPACT_ETA') {
+      const hrsPart = cd.hrs > 0 ? `${cd.hrs}h ` : '';
+      return `ETA: ${hrsPart}${cd.mins}m ${cd.secs}s`;
     }
-    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    if (cd.countdownType === 'CORE_LIFESPAN') {
+      return `CORE: ${cd.mins}m ${cd.secs}s`;
+    }
+    return cd.formatted.replace(' remaining', '');
   };
 
   // Filtered hazard list based on segregation criteria
@@ -182,7 +182,7 @@ export const HydrometHazardPanel: React.FC<HydrometHazardPanelProps> = ({
             {/* Live countdown timer widget */}
             <div className="flex items-center gap-1 text-[11px] font-mono font-bold bg-[#161b22] px-2 py-0.5 rounded border border-[#30363d] text-[#38bdf8] shrink-0">
               <Clock size={11} className="text-[#38bdf8]" />
-              <span>{formatCountdown(primarySevereAlert.validUntilEpoch)}</span>
+              <span>{formatCountdown(primarySevereAlert)}</span>
             </div>
           </div>
 
@@ -385,7 +385,7 @@ export const HydrometHazardPanel: React.FC<HydrometHazardPanelProps> = ({
                     <div className="mt-1.5 flex items-center justify-between text-[9.5px] text-[#8b949e] border-t border-[#30363d]/50 pt-1.5">
                       <div className="flex items-center gap-1 text-[#38bdf8] font-mono">
                         <Clock size={9} />
-                        <span>{formatCountdown(hazard.validUntilEpoch)}</span>
+                        <span>{formatCountdown(hazard)}</span>
                       </div>
                       <span>Valid to {hazard.validUntilIST}</span>
                     </div>

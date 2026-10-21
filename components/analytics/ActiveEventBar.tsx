@@ -241,15 +241,24 @@ export const ActiveEventBar: React.FC<ActiveEventBarProps> = ({
                   ? 'bg-red-500/20 text-red-300 border-red-500/40'
                   : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
               }`}>
-                REMAINING
+                {cd.countdownType === 'IMPACT_ETA' ? 'IMPACT ETA' : cd.countdownType === 'CORE_LIFESPAN' ? 'CORE LIFESPAN' : 'REMAINING'}
               </span>
             </div>
           </div>
         </div>
         <div className="h-8 w-[1.5px] bg-slate-700/80 hidden lg:block" />
-        <div className="text-[10.5px] text-slate-300 hidden lg:block leading-tight font-medium max-w-xs">
-          <div className="text-amber-300 font-bold truncate">{cd.hazardBadge}</div>
-          <div className="text-slate-400 text-[9.5px] truncate">{cd.operationalWindowLabel}</div>
+        <div className="text-[10.5px] text-slate-300 hidden lg:block leading-tight font-medium max-w-sm">
+          <div className="text-amber-300 font-bold truncate flex items-center gap-1.5">
+            <span>{cd.hazardBadge}</span>
+            <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800 font-mono">
+              📡 {cd.radarName.split(' ')[0]} {cd.reflectivityDbz} dBZ
+            </span>
+          </div>
+          <div className="text-slate-400 text-[9.5px] truncate flex items-center gap-1.5 mt-0.5">
+            <span>🛰️ INSAT-3DR: {cd.insatCloudTopTempC}°C</span>
+            <span>·</span>
+            <span className="text-cyan-400">{cd.operationalWindowLabel}</span>
+          </div>
         </div>
       </div>
 

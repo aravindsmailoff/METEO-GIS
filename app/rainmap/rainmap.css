@@ -1,0 +1,273 @@
+/* ═══════════════════════════════════════════════════════════════
+   RainMap — Apple-Grade Citizen Flood & Disaster Intelligence
+   Design System: iOS 18 Frosted Glass & Cupertino Dark OLED
+   ═══════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  --apple-bg: #000000;
+  --apple-card-bg: rgba(22, 22, 28, 0.72);
+  --apple-glass-bg: rgba(255, 255, 255, 0.06);
+  --apple-glass-border: rgba(255, 255, 255, 0.12);
+  --apple-glass-border-subtle: rgba(255, 255, 255, 0.08);
+  --apple-text-primary: #ffffff;
+  --apple-text-secondary: rgba(255, 255, 255, 0.65);
+  --apple-text-tertiary: rgba(255, 255, 255, 0.45);
+  --apple-blue: #007aff;
+  --apple-sky: #38bdf8;
+  --apple-red: #ff453a;
+  --apple-orange: #ff9f0a;
+  --apple-yellow: #ffd60a;
+  --apple-green: #30d158;
+}
+
+/* ── Apple Mobile App Stage & Chassis ── */
+.phone-stage {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #060709;
+  background-image: radial-gradient(circle at 50% 25%, rgba(56, 189, 248, 0.08) 0%, transparent 60%);
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Plus Jakarta Sans", system-ui, sans-serif;
+  color: var(--apple-text-primary);
+}
+
+.phone-chassis {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  height: 100%;
+  max-height: 880px;
+  background-color: #000000;
+  border-radius: 52px;
+  box-shadow:
+    0 25px 70px -12px rgba(0, 0, 0, 0.95),
+    0 0 0 10px #18181b,
+    0 0 0 12px #27272a,
+    0 0 0 14px rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 640px) {
+  .phone-stage {
+    background: #000000;
+  }
+  .phone-chassis {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 0;
+    box-shadow: none;
+    border: none;
+  }
+}
+
+.ios-status-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 400;
+  pointer-events: none;
+}
+
+.ios-time {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.2px;
+}
+
+.ios-status-icons {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ios-home-indicator-bar {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 134px;
+  height: 4.5px;
+  background-color: rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  z-index: 400;
+  pointer-events: none;
+}
+
+/* Base Body & Layout */
+.apple-shell {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--apple-bg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Edge-to-Edge Map Base */
+.apple-map-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+}
+
+/* Leaflet Container Overrides for Seamless Apple Dark Canvas */
+.apple-map-canvas .leaflet-container {
+  width: 100% !important;
+  height: 100% !important;
+  background: #000000 !important;
+  font-family: inherit !important;
+}
+
+.apple-map-canvas .leaflet-tile {
+  filter: brightness(0.72) invert(1) contrast(3.4) hue-rotate(200deg) saturate(0.25);
+}
+
+.apple-map-canvas .leaflet-popup-content-wrapper {
+  background: rgba(18, 18, 24, 0.88) !important;
+  backdrop-filter: blur(30px) saturate(190%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  border-radius: 20px !important;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.6) !important;
+  color: #fff !important;
+  padding: 0 !important;
+}
+
+.apple-map-canvas .leaflet-popup-tip {
+  background: rgba(18, 18, 24, 0.88) !important;
+}
+
+/* Apple Bottom Sheet Drawer */
+.apple-drawer-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 14, 18, 0.82);
+  backdrop-filter: blur(48px) saturate(210%);
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  border-top-left-radius: 36px;
+  border-top-right-radius: 36px;
+  box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.7);
+  transition: transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), height 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, height;
+}
+
+/* Glass Specular Rim */
+.apple-drawer-sheet::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 36px;
+  right: 36px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+  pointer-events: none;
+}
+
+/* Handle Bar */
+.apple-drawer-handle {
+  width: 44px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+  margin: 12px auto 6px auto;
+  cursor: grab;
+  transition: background 0.2s;
+}
+.apple-drawer-handle:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* Custom Scrollbars inside Drawer */
+.apple-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.apple-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+.apple-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.apple-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+}
+
+/* Apple Bento Cards */
+.apple-bento {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 26px;
+  backdrop-filter: blur(24px);
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.25s, transform 0.25s;
+}
+.apple-bento:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* Large Numbers Typography like iOS Weather */
+.apple-stat-hero {
+  font-size: 3.5rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: #ffffff;
+}
+
+/* Pulsing Wave Ring Animation for Radar & Dam Warning */
+@keyframes apple-sonar-wave {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.animate-sonar {
+  animation: apple-sonar-wave 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+}
+
+/* Glowing Aurora Backdrop in panels */
+.apple-aurora {
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.2) 0%, rgba(0, 122, 255, 0.05) 50%, transparent 80%);
+  filter: blur(36px);
+  pointer-events: none;
+}
