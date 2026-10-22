@@ -451,11 +451,32 @@ export async function getLiveAwsStations(): Promise<DirectImdStation[]> {
   return [];
 }
 
+// 5-Minute In-Memory & Persistent Edge Cache State
+let _memoryHazardsCache: { data: DirectImdHazard[]; timestamp: number } | null = null;
+let _lastSuccessfulSyncTimestamp = Date.now();
+export const IMD_PULL_CYCLE_MS = 5 * 60 * 1000; // 5 minutes
+
+export function getLastImdSyncTimestamp(): number {
+  return _lastSuccessfulSyncTimestamp;
+}
+
+export function getSyncCountdownSeconds(): number {
+  const elapsed = Date.now() - _lastSuccessfulSyncTimestamp;
+  const rem = Math.max(0, Math.round((IMD_PULL_CYCLE_MS - elapsed) / 1000));
+  return rem;
+}
+
 /**
  * 4. Main Autonomous Hazard Ingestion Pipeline
- * Combines 100% Genuine IMD Warnings, Convective Nowcasts, and High-Rainfall Ground Sensors directly.
+ * Pulls directly from IMD GeoServer WFS on a strict 5-minute refresh cycle.
+ * Combines 100% Genuine IMD Warnings, Convective Nowcasts, and High-Rainfall Ground Sensors.
  */
-export async function getDirectUnifiedHazards(): Promise<DirectImdHazard[]> {
+export async function getDirectUnifiedHazards(forceRefresh = false): Promise<DirectImdHazard[]> {
+  const now = Date.now();
+  if (!forceRefresh && _memoryHazardsCache && (now - _memoryHazardsCache.timestamp < IMD_PULL_CYCLE_MS)) {
+    return _memoryHazardsCache.data;
+  }
+
   const [warnings, nowcasts, stations] = await Promise.all([
     getLiveWarnings(),
     getLiveNowcasts(),
@@ -590,10 +611,25 @@ export async function getDirectUnifiedHazards(): Promise<DirectImdHazard[]> {
   hazards.sort((a, b) => rank(b.severity) - rank(a.severity));
 
   if (hazards.length > 0) {
+    _memoryHazardsCache = { data: hazards, timestamp: Date.now() };
+    _lastSuccessfulSyncTimestamp = Date.now();
     AsyncStorage.setItem(STORAGE_KEY_HAZARDS, JSON.stringify(hazards)).catch(() => {});
+    return hazards;
   }
 
-  return hazards;
+  // Resilient offline fallback: restore latest cached IMD bulletin if network is interrupted
+  try {
+    const cachedStr = await AsyncStorage.getItem(STORAGE_KEY_HAZARDS);
+    if (cachedStr) {
+      const parsed = JSON.parse(cachedStr);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        _memoryHazardsCache = { data: parsed, timestamp: Date.now() };
+        return parsed;
+      }
+    }
+  } catch {}
+
+  return [];
 }
 
 /**

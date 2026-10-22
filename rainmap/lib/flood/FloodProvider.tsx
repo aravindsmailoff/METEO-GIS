@@ -603,13 +603,12 @@ export function getAllMapMarkers(reports: LocalReport[]): MapMarker[] {
     },
   ];
 
-  // Merge unique authoritative markers (each plotted once at true geolocation)
+  // Merge unique authoritative infrastructure and local report markers
+  // (Meteorological alert pins are managed exclusively and directly by the IMD service in MapScreen)
   const markerMap = new Map<string, MapMarker>();
 
   for (const m of [
     ...LIVE_IMD_RADAR_MARKERS,
-    ..._cachedLiveApiMarkers,
-    ...imdHazardHotspots,
     ...authoritativeDams,
     ...authoritativeShelters,
     ...rescueMarkers,

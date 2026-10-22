@@ -74,6 +74,12 @@ export function mapDirectImdHazardsToSevereAlerts(hazards: DirectImdHazard[]): S
     radarEchoDbz: h.radarEchoDbz,
     slopeDeg: h.slopeDeg,
     statusBadge: h.statusBadge,
+    bulletinDetails: h.bulletinDetails,
+    day1Color: h.day1Color,
+    day2Color: h.day2Color,
+    day3Color: h.day3Color,
+    day4Color: h.day4Color,
+    day5Color: h.day5Color,
   }));
 }
 

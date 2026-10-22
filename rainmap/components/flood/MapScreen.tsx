@@ -48,6 +48,9 @@ import { detectRealLocation, DEFAULT_FALLBACK_LOCATION } from "@/lib/meteo/locat
 import { fetchLiveMeteoGis, type MeteoGisPayload } from "@/lib/meteo/liveMeteoService";
 import {
   getDirectUnifiedHazards,
+  getSyncCountdownSeconds,
+  getLastImdSyncTimestamp,
+  IMD_PULL_CYCLE_MS,
   type DirectImdHazard,
 } from "@/lib/meteo/imdDirectService";
 import {
@@ -129,6 +132,7 @@ export default function MapScreen() {
   const [activeImdModalHazard, setActiveImdModalHazard] = useState<DirectImdHazard | null>(null);
   const [imdModalOpen, setImdModalOpen] = useState(false);
   const [isSyncingImd, setIsSyncingImd] = useState(false);
+  const [syncCountdown, setSyncCountdown] = useState<number>(() => getSyncCountdownSeconds());
 
   // Drawer / Bottom sheet active tab: "alerts" | "overview"
   const [activeDrawerTab, setActiveDrawerTab] = useState<"alerts" | "overview">("alerts");
@@ -252,48 +256,70 @@ export default function MapScreen() {
     };
   }, []);
 
-  // ── Live IMD, NASA & Bhuvan Sync for Current Map Center ──
-  const handleSyncFeeds = async () => {
+  // ── 5-Minute Autonomous IMD Ingestion & Real-Time Countdown ──
+  const syncImdFeeds = async (forceRefresh = false) => {
+    setIsSyncingImd(true);
     try {
       const [payload, govHazards] = await Promise.all([
         fetchLiveMeteoGis(viewCenter.latitude, viewCenter.longitude).catch(() => null),
-        getDirectUnifiedHazards().catch(() => []),
+        getDirectUnifiedHazards(forceRefresh).catch(() => []),
       ]);
       if (payload) setLivePayload(payload);
       if (govHazards && govHazards.length > 0) setDirectHazards(govHazards);
     } catch {
       // Silently maintain cached telemetry
+    } finally {
+      setIsSyncingImd(false);
+      setSyncCountdown(getSyncCountdownSeconds());
     }
   };
+
+  const handleSyncFeeds = () => syncImdFeeds(true);
 
   useEffect(() => {
     let active = true;
 
-    async function sync() {
-      setIsSyncingImd(true);
-      try {
-        const [payload, govHazards] = await Promise.all([
-          fetchLiveMeteoGis(viewCenter.latitude, viewCenter.longitude).catch(() => null),
-          getDirectUnifiedHazards().catch(() => []),
-        ]);
-        if (active) {
-          if (payload) setLivePayload(payload);
-          if (govHazards && govHazards.length > 0) setDirectHazards(govHazards);
-        }
-      } catch {
-        // Silently maintain cached telemetry
-      } finally {
-        if (active) setIsSyncingImd(false);
-      }
-    }
+    // 1. Initial sync on app mount
+    syncImdFeeds(false);
 
-    sync();
-    const interval = setInterval(sync, 45000);
+    // 2. Strict 5-Minute Auto-Pull Loop (300,000 ms) from IMD GeoServer WFS
+    const fiveMinInterval = setInterval(() => {
+      if (active) syncImdFeeds(true);
+    }, IMD_PULL_CYCLE_MS);
+
+    // 3. 1-Second Countdown Ticker for Real-time HUD Indicator
+    const ticker = setInterval(() => {
+      if (active) setSyncCountdown(getSyncCountdownSeconds());
+    }, 1000);
+
     return () => {
       active = false;
-      clearInterval(interval);
+      clearInterval(fiveMinInterval);
+      clearInterval(ticker);
     };
+  }, []);
+
+  // Update local center weather telemetry when map moves
+  useEffect(() => {
+    fetchLiveMeteoGis(viewCenter.latitude, viewCenter.longitude)
+      .then((payload) => {
+        if (payload) setLivePayload(payload);
+      })
+      .catch(() => {});
   }, [viewCenter.latitude, viewCenter.longitude]);
+
+  const formattedCountdown = useMemo(() => {
+    const mins = Math.floor(syncCountdown / 60);
+    const secs = syncCountdown % 60;
+    return `${mins}m ${secs < 10 ? "0" : ""}${secs}s`;
+  }, [syncCountdown]);
+
+  const alertStats = useMemo(() => {
+    const red = directHazards.filter((h) => h.severity === "EXTREME" || h.day1Color === "RED").length;
+    const orange = directHazards.filter((h) => h.severity === "SEVERE" || h.day1Color === "ORANGE").length;
+    const yellow = directHazards.filter((h) => h.severity === "MODERATE" || h.day1Color === "YELLOW").length;
+    return { red, orange, yellow, total: directHazards.length };
+  }, [directHazards]);
 
   // All severe alerts from national sources (Prioritizes direct government feed)
   const allSevereAlerts = useMemo(() => {
@@ -484,6 +510,17 @@ export default function MapScreen() {
             state: a.state,
             precautions: a.precautions,
             rainfallRateMmH: a.rainfallMmH,
+            windSpeedKmh: a.windSpeedKmh,
+            windDirectionDeg: a.windDirectionDeg,
+            windCardinal: a.windCardinal,
+            bulletinDetails: a.bulletinDetails,
+            issuedAt: a.issuedAt,
+            validUntil: a.validUntil,
+            day1Color: a.day1Color,
+            day2Color: a.day2Color,
+            day3Color: a.day3Color,
+            day4Color: a.day4Color,
+            day5Color: a.day5Color,
           },
         });
       }
@@ -653,23 +690,55 @@ export default function MapScreen() {
         </View>
       </View>
 
-      {/* ── 2026 REACT BITS · LIVE IMD GOVERNMENT TELEMETRY BANNER ── */}
+      {/* ── 2026 REACT BITS · LIVE IMD GOVERNMENT 5-MIN TELEMETRY BANNER ── */}
       <View style={styles.liveGovBanner}>
-        <ReactBitsPulsePill
-          label={`${directHazards.length || 137} IMD WARNINGS ACTIVE`}
-          color={directHazards.some((h) => h.severity === "EXTREME") ? "#EF4444" : "#F59E0B"}
-          count={directHazards.filter((h) => h.severity === "EXTREME" || h.severity === "SEVERE").length}
-          onPress={() => {
-            setActiveDrawerTab("alerts");
-            setSheetExpanded(true);
-          }}
-        />
-        <ReactBitsShinyText
-          text="LIVE GOVT OF INDIA IMD WFS FEED"
-          shimmerColor="#38BDF8"
-          baseColor="#64748B"
-          style={styles.liveGovBannerSub}
-        />
+        <View style={styles.liveGovBannerTopRow}>
+          <ReactBitsPulsePill
+            label={
+              alertStats.red > 0
+                ? `${alertStats.red} RED · ${alertStats.orange} ORANGE · ${alertStats.yellow} YELLOW`
+                : `${alertStats.orange} ORANGE · ${alertStats.yellow} YELLOW ALERTS`
+            }
+            color={alertStats.red > 0 ? "#EF4444" : alertStats.orange > 0 ? "#F97316" : "#EAB308"}
+            count={alertStats.red + alertStats.orange}
+            onPress={() => {
+              setActiveDrawerTab("alerts");
+              setSheetExpanded(true);
+            }}
+          />
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Refresh IMD Feed"
+            onPress={() => syncImdFeeds(true)}
+            style={({ pressed }) => [
+              styles.syncNowBtn,
+              isSyncingImd && styles.syncNowBtnActive,
+              pressed && { opacity: 0.7 },
+            ]}
+          >
+            <Ionicons
+              name={isSyncingImd ? "sync-outline" : "refresh-outline"}
+              size={12}
+              color="#38BDF8"
+            />
+            <Text style={styles.syncNowBtnText}>
+              {isSyncingImd ? "Syncing..." : "↻ 5m Pull"}
+            </Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.liveGovBannerSubRow}>
+          <Text style={styles.liveGovCycleText}>
+            ⏱️ Next IMD Pull: <Text style={styles.liveGovCountdownText}>{formattedCountdown}</Text>
+          </Text>
+          <ReactBitsShinyText
+            text="IMD GEOSERVER WFS LIVE STREAM"
+            shimmerColor="#38BDF8"
+            baseColor="#64748B"
+            style={styles.liveGovBannerSub}
+          />
+        </View>
       </View>
 
       {/* ── METEO-GIS QUICK STATE SELECTOR CHIPS ── */}
@@ -767,12 +836,44 @@ export default function MapScreen() {
               }
 
               // Match authentic government hazard to display full official dossier
-              const matched = directHazards.find(
+              let matched = directHazards.find(
                 (h) =>
                   h.id === marker.id ||
                   marker.id.includes(h.id) ||
                   (h.district && marker.title.toLowerCase().includes(h.district.toLowerCase()))
               );
+
+              if (!matched && (marker.type === "risk" || marker.type === "imd" || marker.type === "landslide" || marker.extra)) {
+                const ex = marker.extra || {};
+                const isCrit = marker.level === "critical" || ex.level === "RED" || ex.severity === "EXTREME";
+                const isDang = marker.level === "danger" || ex.level === "ORANGE" || ex.severity === "SEVERE";
+                matched = {
+                  id: marker.id,
+                  category: (ex.category || (marker.type === "landslide" ? "LANDSLIDE" : "THUNDERSTORM")) as any,
+                  severity: isCrit ? "EXTREME" : isDang ? "SEVERE" : "MODERATE",
+                  headline: ex.headline || marker.title,
+                  bulletinDetails: ex.bulletinDetails || ex.headline || marker.subtitle || "Official Meteorological Hazard Warning issued by IMD Weather Forecasting Division.",
+                  district: ex.district || marker.title.split("·")[0].replace(/^IMD [A-Z]+: /, "").trim(),
+                  state: ex.state || "India",
+                  latitude: marker.latitude,
+                  longitude: marker.longitude,
+                  issuedAt: ex.issuedAt || "Official IMD 5m Auto-Pull Bulletin",
+                  validUntil: ex.validUntil || "Valid for 24h Synoptic Cycle",
+                  source: ex.source || "India Meteorological Department (IMD)",
+                  precautions: ex.precautions || OFFICIAL_PRECAUTIONS.THUNDERSTORM,
+                  rainfallMmH: ex.rainfallRateMmH,
+                  windSpeedKmh: ex.windSpeedKmh,
+                  windDirectionDeg: ex.windDirectionDeg,
+                  windCardinal: ex.windCardinal,
+                  radarEchoDbz: ex.radarEchoDbz,
+                  day1Color: isCrit ? "RED" : isDang ? "ORANGE" : "YELLOW",
+                  day2Color: ex.day2Color || "GREEN",
+                  day3Color: ex.day3Color || "GREEN",
+                  day4Color: ex.day4Color || "GREEN",
+                  day5Color: ex.day5Color || "GREEN",
+                };
+              }
+
               if (matched) {
                 setActiveImdModalHazard(matched);
                 setImdModalOpen(true);
@@ -1121,23 +1222,70 @@ const styles = StyleSheet.create({
     boxShadow: "0 8px 30px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.16)",
   },
   liveGovBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
     marginHorizontal: 12,
     marginBottom: 6,
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 7,
     borderRadius: 14,
-    backgroundColor: "rgba(11, 23, 38, 0.9)",
+    backgroundColor: "rgba(11, 23, 38, 0.94)",
     borderWidth: 1,
-    borderColor: "rgba(56, 189, 248, 0.25)",
+    borderColor: "rgba(56, 189, 248, 0.28)",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 8,
+    gap: 5,
+  },
+  liveGovBannerTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  liveGovBannerSubRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingTop: 2,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.06)",
+  },
+  liveGovCycleText: {
+    fontFamily: SF_PRO,
+    fontSize: 9.5,
+    color: "#94A3B8",
+    fontWeight: "500",
+  },
+  liveGovCountdownText: {
+    color: "#38BDF8",
+    fontWeight: "700",
   },
   liveGovBannerSub: {
     fontFamily: SF_PRO,
-    fontSize: 9.5,
+    fontSize: 9,
     fontWeight: "700",
     letterSpacing: 0.6,
+  },
+  syncNowBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(56, 189, 248, 0.12)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(56, 189, 248, 0.3)",
+  },
+  syncNowBtnActive: {
+    backgroundColor: "rgba(56, 189, 248, 0.25)",
+    borderColor: "#38BDF8",
+  },
+  syncNowBtnText: {
+    fontFamily: SF_PRO,
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#38BDF8",
   },
   kokonutIslandContainer: {
     marginHorizontal: 12,

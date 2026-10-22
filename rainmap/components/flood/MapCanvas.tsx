@@ -246,11 +246,20 @@ function getMarkerColor(marker: MapMarker): string {
   if (marker.type === "reservoir") return "#0EA5E9";
   if (marker.type === "relief") return "#22C55E";
   if (marker.type === "ndrf") return "#16A34A";
+  if (marker.type === "imd" && !marker.extra?.severity && !marker.extra?.day1Color) return "#38BDF8";
 
-  const sev = String(marker.extra?.severity || marker.level || "").toUpperCase();
-  if (sev.includes("RED") || sev.includes("EXTREME") || sev.includes("CRITICAL") || marker.level === "danger" || marker.level === "critical") return "#EF4444";
-  if (sev.includes("ORANGE") || sev.includes("SEVERE") || marker.level === "warning") return "#F97316";
-  if (sev.includes("YELLOW") || sev.includes("MODERATE") || marker.level === "watch") return "#EAB308";
+  // 1. Explicit IMD Alert Color Priority (Day1_Color or direct level)
+  const explicitColor = String(marker.extra?.day1Color || marker.extra?.level || "").toUpperCase();
+  if (explicitColor === "RED" || explicitColor === "1") return "#EF4444";
+  if (explicitColor === "ORANGE" || explicitColor === "2") return "#F97316";
+  if (explicitColor === "YELLOW" || explicitColor === "3") return "#EAB308";
+  if (explicitColor === "GREEN" || explicitColor === "4") return "#22C55E";
+
+  // 2. Severity Classification Priority
+  const sev = String(marker.extra?.severity || "").toUpperCase();
+  if (sev === "EXTREME" || sev.includes("RED") || marker.level === "critical") return "#EF4444";
+  if (sev === "SEVERE" || sev.includes("ORANGE") || marker.level === "danger") return "#F97316";
+  if (sev === "MODERATE" || sev.includes("YELLOW") || marker.level === "warning" || marker.level === "watch") return "#EAB308";
   if (marker.level === "safe") return "#22C55E";
   return "#EAB308";
 }
@@ -261,7 +270,14 @@ function getMarkerIcon(marker: MapMarker): keyof typeof Ionicons.glyphMap {
   if (marker.type === "ndrf") return "shield-checkmark";
   if (marker.type === "landslide") return "trending-down";
   if (marker.type === "infrastructure") return "construct";
-  if (marker.type === "report") return "alert";
+  if (marker.type === "report") return "chatbubble-ellipses";
+
+  const cat = String(marker.extra?.category || "").toUpperCase();
+  if (cat.includes("CLOUDBURST") || cat.includes("RAIN")) return "rainy";
+  if (cat.includes("THUNDER") || cat.includes("LIGHTNING")) return "flash";
+  if (cat.includes("WIND") || cat.includes("SQUALL")) return "flag";
+  if (cat.includes("HAIL")) return "snow";
+  if (cat.includes("LANDSLIDE")) return "trending-down";
   return "warning";
 }
 
@@ -503,17 +519,19 @@ export function MapCanvas({
                 );
               })}
 
-              {/* Convective Threat Halos Under Warnings */}
+              {/* Convective Threat Halos Under Extreme Red Warnings */}
               {projectedMarkers
-                .filter(({ marker }) => marker.type === "risk" || marker.type === "imd" || marker.level === "critical" || marker.level === "danger" || marker.level === "warning")
+                .filter(({ marker }) => {
+                  const color = getMarkerColor(marker);
+                  return color === "#EF4444" || marker.level === "critical";
+                })
                 .map(({ marker, x, y }) => {
                   const color = getMarkerColor(marker);
-                  const isSevere = marker.level === "critical" || marker.level === "danger";
-                  const radius = isSevere ? 48 : 36;
+                  const radius = 38;
                   return (
                     <G key={`hazard-halo-${marker.id}`}>
-                      <Circle cx={x} cy={y} r={radius} fill={color} opacity={0.22} />
-                      <Circle cx={x} cy={y} r={radius + 12} stroke={color} strokeWidth="1.2" strokeDasharray="4, 5" fill="none" opacity={0.5} />
+                      <Circle cx={x} cy={y} r={radius} fill={color} opacity={0.16} />
+                      <Circle cx={x} cy={y} r={radius + 8} stroke={color} strokeWidth="1" strokeDasharray="3, 4" fill="none" opacity={0.4} />
                     </G>
                   );
                 })}
@@ -531,11 +549,8 @@ export function MapCanvas({
           {size.width > 0 && size.height > 0 && projectedMarkers.map(({ marker, x, y }) => {
             const color = getMarkerColor(marker);
             const icon = getMarkerIcon(marker);
-            const isCritical =
-              marker.level === "critical" ||
-              marker.level === "danger" ||
-              color === "#EF4444" ||
-              color === "#F97316";
+            const isCritical = color === "#EF4444" || marker.level === "critical";
+            const isOrangeAlert = color === "#F97316" || marker.level === "danger";
             const posX = Math.round(x - 17);
             const posY = Math.round(y - 30);
             const districtLabel = marker.title.split("·")[0].split(":")[0].trim();
@@ -604,7 +619,7 @@ export function MapCanvas({
                   <View style={[mapStyles.pinDropStem, { backgroundColor: color }]} />
 
                   {/* Tactical District Callout Capsule */}
-                  {isCritical ? (
+                  {(isCritical || (isOrangeAlert && zoom >= 7)) ? (
                     <View style={[mapStyles.markerTacticalLabel, { borderColor: `${color}88` }]}>
                       <View style={[mapStyles.markerTacticalDot, { backgroundColor: color }]} />
                       <Text numberOfLines={1} style={mapStyles.markerTacticalText}>

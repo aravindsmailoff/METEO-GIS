@@ -74,4 +74,10 @@ export interface SevereWeatherAlert {
   windDirectionDeg?: number;
   windCardinal?: string;
   radarEchoDbz?: number;
+  bulletinDetails?: string;
+  day1Color?: "RED" | "ORANGE" | "YELLOW" | "GREEN";
+  day2Color?: "RED" | "ORANGE" | "YELLOW" | "GREEN";
+  day3Color?: "RED" | "ORANGE" | "YELLOW" | "GREEN";
+  day4Color?: "RED" | "ORANGE" | "YELLOW" | "GREEN";
+  day5Color?: "RED" | "ORANGE" | "YELLOW" | "GREEN";
 }
