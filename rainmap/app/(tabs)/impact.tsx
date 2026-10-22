@@ -17,6 +17,10 @@ import {
   type RescueUnit,
 } from "@/lib/meteo/liveMeteoService";
 import { ReactBitsBackground } from "@/components/meteo/ReactBitsBackground";
+import { MobilePowerBiAnalyticsPanel } from "@/components/analytics/MobilePowerBiAnalyticsPanel";
+import { MobileImdRadarModal } from "@/components/command/MobileImdRadarModal";
+import { MobileInsatSatelliteModal } from "@/components/command/MobileInsatSatelliteModal";
+
 
 const metricKeys = [
   ["roadsMetric", "roadsMetricDetail"],
@@ -31,8 +35,13 @@ export default function ImpactScreen() {
   const t = (key: Parameters<typeof copy>[1]) => copy(language, key);
   const router = useRouter();
   const [scenarioOpen, setScenarioOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<"powerbi" | "infrastructure">("powerbi");
+  const [radarModalOpen, setRadarModalOpen] = useState(false);
+  const [satelliteModalOpen, setSatelliteModalOpen] = useState(false);
+  const [radarStation, setRadarStation] = useState("delhi");
 
   // Meteo-GIS Live Overview state
+
   const [kpis, setKpis] = useState<MeteoOverviewKpis>({
     activeWarningsCount: 18,
     reportingStationsCount: 42,
@@ -84,7 +93,55 @@ export default function ImpactScreen() {
           </View>
         </View>
 
+        {/* ── Mode Toggle: POWERBI ANALYTICS vs INFRASTRUCTURE IMPACT ── */}
+        <View style={styles.viewModeToggleRow}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setViewMode("powerbi")}
+            style={[styles.viewModeBtn, viewMode === "powerbi" && styles.viewModeBtnActive]}
+          >
+            <Ionicons
+              name="analytics"
+              size={13}
+              color={viewMode === "powerbi" ? "#38BDF8" : "#64748B"}
+            />
+            <Text style={[styles.viewModeText, viewMode === "powerbi" && styles.viewModeTextActive]}>
+              POWERBI ANALYTICS
+            </Text>
+          </Pressable>
+
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setViewMode("infrastructure")}
+            style={[styles.viewModeBtn, viewMode === "infrastructure" && styles.viewModeBtnActive]}
+          >
+            <Ionicons
+              name="construct"
+              size={13}
+              color={viewMode === "infrastructure" ? "#38BDF8" : "#64748B"}
+            />
+            <Text style={[styles.viewModeText, viewMode === "infrastructure" && styles.viewModeTextActive]}>
+              INFRASTRUCTURE
+            </Text>
+          </Pressable>
+        </View>
+
+        {viewMode === "powerbi" ? (
+          <View style={{ minHeight: 600 }}>
+            <MobilePowerBiAnalyticsPanel
+              selectedState="All India"
+              selectedDistrict={area}
+              onOpenRadar={(stn) => {
+                setRadarStation(stn);
+                setRadarModalOpen(true);
+              }}
+              onOpenSatellite={() => setSatelliteModalOpen(true)}
+            />
+          </View>
+        ) : (
+          <>
         <LiveFeedBadge label={t("demo")} />
+
 
         {/* Meteo-GIS Synoptic Disaster Overview Strip */}
         <Card style={styles.meteoOverviewCard}>
@@ -380,10 +437,27 @@ export default function ImpactScreen() {
 
         <ActionButton icon="map" label={t("openMap")} variant="quiet" onPress={() => router.navigate("/(tabs)")} />
         <View style={{ height: 90 }} />
+          </>
+        )}
       </ScrollView>
+
+      {/* ── LIVE IMD DOPPLER RADAR MODAL ── */}
+      <MobileImdRadarModal
+        visible={radarModalOpen}
+        initialStation={radarStation}
+        onClose={() => setRadarModalOpen(false)}
+      />
+
+      {/* ── LIVE INSAT SATELLITE MODAL ── */}
+      <MobileInsatSatelliteModal
+        visible={satelliteModalOpen}
+        onClose={() => setSatelliteModalOpen(false)}
+      />
     </SafeAreaView>
   );
 }
+
+
 
 const styles = StyleSheet.create({
   safe: {
@@ -413,6 +487,41 @@ const styles = StyleSheet.create({
   },
   subtitle: { color: C.muted, fontSize: 13, lineHeight: 18, marginTop: 2 },
   headerIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(10, 132, 255, 0.15)", alignItems: "center", justifyContent: "center" },
+  viewModeToggleRow: {
+    flexDirection: "row",
+    backgroundColor: "#070E1A",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#162740",
+    padding: 4,
+    gap: 6,
+    marginVertical: 4,
+  },
+  viewModeBtn: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingVertical: 9,
+    borderRadius: 9,
+    backgroundColor: "transparent",
+  },
+  viewModeBtnActive: {
+    backgroundColor: "rgba(56, 189, 248, 0.15)",
+    borderWidth: 1,
+    borderColor: "#38BDF8",
+  },
+  viewModeText: {
+    fontSize: 10.5,
+    fontWeight: "800",
+    color: "#64748B",
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  viewModeTextActive: {
+    color: "#38BDF8",
+  },
+
   meteoOverviewCard: {
     backgroundColor: "#161922",
     borderRadius: 22,
