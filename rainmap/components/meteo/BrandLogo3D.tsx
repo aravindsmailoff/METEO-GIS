@@ -18,7 +18,7 @@ export function BrandLogo3D({ compact = false }: Props) {
       {/* ── Apple Typography & Status Pill ── */}
       <View style={styles.textColumn}>
         <View style={styles.titleRow}>
-          <Text style={styles.brandTitle}>MeteoGIS</Text>
+          <Text style={styles.brandTitle}>Loony</Text>
           <View style={styles.appleLivePill}>
             <View style={styles.pulseDot} />
             <Text style={styles.appleLiveText}>LIVE</Text>

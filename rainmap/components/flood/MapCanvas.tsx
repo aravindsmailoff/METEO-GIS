@@ -531,8 +531,15 @@ export function MapCanvas({
           {size.width > 0 && size.height > 0 && projectedMarkers.map(({ marker, x, y }) => {
             const color = getMarkerColor(marker);
             const icon = getMarkerIcon(marker);
+            const isCritical =
+              marker.level === "critical" ||
+              marker.level === "danger" ||
+              color === "#EF4444" ||
+              color === "#F97316";
             const posX = Math.round(x - 17);
             const posY = Math.round(y - 30);
+            const districtLabel = marker.title.split("·")[0].split(":")[0].trim();
+
             return (
               <View
                 key={marker.id}
@@ -542,9 +549,36 @@ export function MapCanvas({
                   {
                     left: posX,
                     top: posY,
+                    zIndex: isCritical ? 35 : 20,
                   },
                 ]}
               >
+                {/* ── Concentric Sonar Wave for Active Severe Alerts ── */}
+                {isCritical ? (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      mapStyles.sonarRing,
+                      {
+                        borderColor: color,
+                        backgroundColor: `${color}18`,
+                        transform: [
+                          {
+                            scale: pulseAnim.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [0.9, 2.7],
+                            }),
+                          },
+                        ],
+                        opacity: pulseAnim.interpolate({
+                          inputRange: [0, 0.6, 1],
+                          outputRange: [0.85, 0.35, 0],
+                        }),
+                      },
+                    ]}
+                  />
+                ) : null}
+
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`${marker.title}. ${marker.subtitle}`}
@@ -554,10 +588,30 @@ export function MapCanvas({
                     pressed && { transform: [{ scale: 1.15 }] },
                   ]}
                 >
-                  <View style={[mapStyles.pinDropCircle, { backgroundColor: color }]}>
+                  <View
+                    style={[
+                      mapStyles.pinDropCircle,
+                      {
+                        backgroundColor: color,
+                        shadowColor: color,
+                        shadowRadius: isCritical ? 10 : 5,
+                        shadowOpacity: isCritical ? 0.85 : 0.45,
+                      },
+                    ]}
+                  >
                     <Ionicons name={icon} size={15} color="#FFFFFF" />
                   </View>
                   <View style={[mapStyles.pinDropStem, { backgroundColor: color }]} />
+
+                  {/* Tactical District Callout Capsule */}
+                  {isCritical ? (
+                    <View style={[mapStyles.markerTacticalLabel, { borderColor: `${color}88` }]}>
+                      <View style={[mapStyles.markerTacticalDot, { backgroundColor: color }]} />
+                      <Text numberOfLines={1} style={mapStyles.markerTacticalText}>
+                        {districtLabel}
+                      </Text>
+                    </View>
+                  ) : null}
                 </Pressable>
               </View>
             );
@@ -740,6 +794,43 @@ const mapStyles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     zIndex: 20,
+  },
+  sonarRing: {
+    position: "absolute",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1.5,
+    zIndex: 1,
+  },
+  markerTacticalLabel: {
+    position: "absolute",
+    top: -18,
+    alignSelf: "center",
+    backgroundColor: "rgba(8, 14, 24, 0.92)",
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    zIndex: 5,
+    shadowColor: "#000",
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+  },
+  markerTacticalDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
+  markerTacticalText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "800",
+    fontFamily: SF_PRO,
+    letterSpacing: 0.3,
   },
   pinDropPressable: {
     width: 34,

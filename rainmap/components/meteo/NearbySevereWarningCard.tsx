@@ -9,6 +9,11 @@ import {
   WatermelonShimmerBadge,
   WatermelonSpringButton,
 } from "./WatermelonAnimations";
+import {
+  ReactBitsBorderBeam,
+  ReactBitsDecryptedText,
+  ReactBitsShinyText,
+} from "./ReactBitsComponents";
 
 interface Props {
   alert: SevereWeatherAlert | null;
@@ -170,19 +175,7 @@ export function NearbySevereWarningCard({
           style={[styles.card, { borderColor: sev.cardBorder, backgroundColor: sev.cardGlow, overflow: "hidden" }]}
         >
           {/* React Bits: Animated Traveling Border Beam */}
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.borderBeamGlow,
-              {
-                left: shimmerAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ["-40%", "100%"],
-                }),
-                backgroundColor: sev.bg,
-              },
-            ]}
-          />
+          <ReactBitsBorderBeam color={sev.bg} size={90} durationMs={3200} />
 
           {/* Top Tag Row */}
           <View style={styles.cardHeader}>
@@ -196,8 +189,13 @@ export function NearbySevereWarningCard({
             </View>
           </View>
 
-          {/* Headline & Locality */}
-          <Text style={styles.alertHeadline}>{alert.headline}</Text>
+          {/* Headline & Locality with React Bits Decrypted Text */}
+          <ReactBitsDecryptedText
+            text={alert.headline}
+            style={[styles.alertHeadline, { color: "#F8FAFC" }]}
+            characters="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!#$"
+            speedMs={25}
+          />
           <Text style={styles.alertDistrict}>
             Impact Sector: {alert.district}, {alert.state}
           </Text>

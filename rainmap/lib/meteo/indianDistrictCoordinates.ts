@@ -268,3 +268,136 @@ export const INDIAN_DISTRICT_COORDINATES: Record<string, DistrictGeoPoint> = {
   'vijayapura': { lat: 16.8302, lng: 75.7100, state: 'Karnataka' },
   'bijapur karnataka': { lat: 16.8302, lng: 75.7100, state: 'Karnataka' },
 };
+
+/**
+ * Resolve district name to normalized GeoPoint
+ */
+export function resolveDistrictGeo(distName: string, stateHint?: string): DistrictGeoPoint | null {
+  if (!distName) return null;
+  const clean = distName.toLowerCase().replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  const normalizedState = (stateHint || '').toLowerCase().trim();
+
+  // If stateHint is Karnataka and district is Bijapur, prioritize Karnataka coordinates
+  if ((clean === 'bijapur' || clean === 'vijayapura') && (normalizedState.includes('karn') || normalizedState.includes('kar'))) {
+    return { lat: 16.8302, lng: 75.7100, state: 'Karnataka' };
+  }
+
+  // Exact match with matching state if stateHint is provided
+  if (INDIAN_DISTRICT_COORDINATES[clean]) {
+    const candidate = INDIAN_DISTRICT_COORDINATES[clean];
+    if (!normalizedState || candidate.state.toLowerCase().includes(normalizedState) || normalizedState.includes(candidate.state.toLowerCase())) {
+      return candidate;
+    }
+  }
+
+  // Search across dictionary where state matches
+  if (normalizedState) {
+    for (const [key, val] of Object.entries(INDIAN_DISTRICT_COORDINATES)) {
+      if (val.state.toLowerCase().includes(normalizedState) || normalizedState.includes(val.state.toLowerCase())) {
+        if (clean === key || key.includes(clean) || clean.includes(key)) {
+          return val;
+        }
+      }
+    }
+  }
+
+  // Exact match fallback
+  if (INDIAN_DISTRICT_COORDINATES[clean]) {
+    return INDIAN_DISTRICT_COORDINATES[clean];
+  }
+
+  // Without spaces or punctuation
+  const stripped = clean.replace(/[^a-z0-9]/g, '');
+  for (const [key, val] of Object.entries(INDIAN_DISTRICT_COORDINATES)) {
+    if (key.replace(/[^a-z0-9]/g, '') === stripped) {
+      return val;
+    }
+  }
+
+  // Substring match
+  for (const [key, val] of Object.entries(INDIAN_DISTRICT_COORDINATES)) {
+    if (clean.includes(key) || key.includes(clean)) {
+      if (!stateHint || val.state.toLowerCase().includes(stateHint.toLowerCase()) || stateHint.toLowerCase().includes(val.state.toLowerCase())) {
+        return val;
+      }
+    }
+  }
+
+  // State-level centroid fallback if district name is not found but state is known
+  if (normalizedState) {
+    const STATE_CENTROIDS: Record<string, { lat: number; lng: number; state: string }> = {
+      'uttarakhand': { lat: 30.0668, lng: 79.0193, state: 'Uttarakhand' },
+      'himachal': { lat: 31.1048, lng: 77.1734, state: 'Himachal Pradesh' },
+      'karnataka': { lat: 15.3173, lng: 75.7139, state: 'Karnataka' },
+      'telangana': { lat: 18.1124, lng: 79.0193, state: 'Telangana' },
+      'andhra': { lat: 15.9129, lng: 79.7400, state: 'Andhra Pradesh' },
+      'tamil': { lat: 11.1271, lng: 78.6569, state: 'Tamil Nadu' },
+      'kerala': { lat: 10.8505, lng: 76.2711, state: 'Kerala' },
+      'maharashtra': { lat: 19.7515, lng: 75.7139, state: 'Maharashtra' },
+      'madhya': { lat: 22.9734, lng: 78.6569, state: 'Madhya Pradesh' },
+      'gujarat': { lat: 22.2587, lng: 71.1924, state: 'Gujarat' },
+      'rajasthan': { lat: 27.0238, lng: 74.2179, state: 'Rajasthan' },
+      'uttar pradesh': { lat: 26.8467, lng: 80.9462, state: 'Uttar Pradesh' },
+      'bihar': { lat: 25.0961, lng: 85.3131, state: 'Bihar' },
+      'west bengal': { lat: 22.9868, lng: 87.8550, state: 'West Bengal' },
+      'assam': { lat: 26.2006, lng: 92.9376, state: 'Assam' },
+      'meghalaya': { lat: 25.4670, lng: 91.3662, state: 'Meghalaya' },
+      'odisha': { lat: 20.9517, lng: 85.0985, state: 'Odisha' },
+      'chhattisgarh': { lat: 21.2787, lng: 81.8661, state: 'Chhattisgarh' },
+      'jammu': { lat: 33.7782, lng: 76.5762, state: 'Jammu & Kashmir' },
+      'ladakh': { lat: 34.1526, lng: 77.5771, state: 'Ladakh' },
+      'punjab': { lat: 31.1471, lng: 75.3412, state: 'Punjab' },
+      'haryana': { lat: 29.0588, lng: 76.0856, state: 'Haryana' },
+      'delhi': { lat: 28.6139, lng: 77.2090, state: 'NCT of Delhi' },
+      'sikkim': { lat: 27.5330, lng: 88.5122, state: 'Sikkim' },
+      'tripura': { lat: 23.9408, lng: 91.9882, state: 'Tripura' },
+      'mizoram': { lat: 23.1645, lng: 92.9376, state: 'Mizoram' },
+      'manipur': { lat: 24.6637, lng: 93.9063, state: 'Manipur' },
+      'nagaland': { lat: 26.1584, lng: 94.5624, state: 'Nagaland' },
+      'arunachal': { lat: 28.2180, lng: 94.7278, state: 'Arunachal Pradesh' },
+      'goa': { lat: 15.2993, lng: 74.1240, state: 'Goa' },
+      'jharkhand': { lat: 23.6102, lng: 85.2799, state: 'Jharkhand' },
+    };
+    for (const [sKey, sVal] of Object.entries(STATE_CENTROIDS)) {
+      if (normalizedState.includes(sKey) || sKey.includes(normalizedState)) {
+        return sVal;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Find the geographically closest Indian district and state for any (lat, lng) coordinate
+ */
+export function getClosestDistrictByCoordinates(lat: number, lng: number): { district: string; state: string; distanceKm: number; isCoastal?: boolean } {
+  let closest: { district: string; state: string; distanceKm: number; isCoastal?: boolean } | null = null;
+  let minDist = 999999;
+
+  const R = 6371;
+  for (const [distName, pt] of Object.entries(INDIAN_DISTRICT_COORDINATES)) {
+    const dLat = ((pt.lat - lat) * Math.PI) / 180;
+    const dLon = ((pt.lng - lng) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat * Math.PI) / 180) * Math.cos((pt.lat * Math.PI) / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const d = R * c;
+
+    if (d < minDist) {
+      minDist = d;
+      const formattedName = distName.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      closest = {
+        district: formattedName,
+        state: pt.state,
+        distanceKm: Math.round(d * 10) / 10,
+        isCoastal: pt.isCoastal,
+      };
+    }
+  }
+
+  return closest || { district: 'Monitored Sector', state: 'India', distanceKm: 0 };
+}
+

@@ -48,6 +48,34 @@ export const SEARCHABLE_LOCATIONS: SearchableLocation[] = [
 ];
 
 import { getCachedLiveAlerts } from "./liveMeteoService";
+import type { DirectImdHazard } from "./imdDirectService";
+
+/**
+ * Transforms direct IMD hazards from government GeoServer into SevereWeatherAlert
+ */
+export function mapDirectImdHazardsToSevereAlerts(hazards: DirectImdHazard[]): SevereWeatherAlert[] {
+  return hazards.map((h) => ({
+    id: h.id,
+    category: h.category,
+    severity: h.severity,
+    headline: h.headline,
+    district: h.district,
+    state: h.state,
+    latitude: h.latitude,
+    longitude: h.longitude,
+    issuedAt: h.issuedAt,
+    validUntil: h.validUntil,
+    source: h.source,
+    precautions: h.precautions,
+    rainfallMmH: h.rainfallMmH,
+    windSpeedKmh: h.windSpeedKmh,
+    windDirectionDeg: h.windDirectionDeg,
+    windCardinal: h.windCardinal,
+    radarEchoDbz: h.radarEchoDbz,
+    slopeDeg: h.slopeDeg,
+    statusBadge: h.statusBadge,
+  }));
+}
 
 /**
  * Builds normalized severe weather alerts from live IMD telemetry
