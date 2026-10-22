@@ -13,6 +13,7 @@ import {
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as Location from "expo-location";
 import { MapCanvas } from "@/components/flood/MapCanvas";
 import { ReportComposer } from "@/components/flood/ReportComposer";
 import { ContextualIntelligencePanel } from "@/components/meteo/ContextualIntelligencePanel";
@@ -136,7 +137,7 @@ export default function MapScreen() {
 
   // Drawer / Bottom sheet active tab: "alerts" | "overview"
   const [activeDrawerTab, setActiveDrawerTab] = useState<"alerts" | "overview">("alerts");
-  const [sheetExpanded, setSheetExpanded] = useState(true);
+  const [sheetExpanded, setSheetExpanded] = useState(false);
 
   // ── Web Dashboard Parity Modals: Satellite, Radar, Evidence Dossier ──
   const [satelliteModalOpen, setSatelliteModalOpen] = useState(false);
@@ -223,7 +224,27 @@ export default function MapScreen() {
 
     initUserLocation();
 
-    // Continuous watch if browser permits
+    // Continuous watch for real mobile GPS
+    let locationSubscription: Location.LocationSubscription | null = null;
+    Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.Balanced, timeInterval: 8000, distanceInterval: 30 },
+      (pos) => {
+        if (!active) return;
+        setUserLocation((curr) => ({
+          ...curr,
+          coords: {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+          },
+          accuracyMeters: pos.coords.accuracy || 15,
+          isGpsActive: true,
+        }));
+      }
+    ).then((sub) => {
+      locationSubscription = sub;
+    }).catch(() => {});
+
+    // Web fallback watch
     let watchId: number | null = null;
     if (typeof window !== "undefined" && "geolocation" in navigator) {
       try {
@@ -243,13 +264,14 @@ export default function MapScreen() {
           () => {},
           { enableHighAccuracy: true, maximumAge: 60000, timeout: 12000 }
         );
-      } catch {
-        // Ignore
-      }
+      } catch {}
     }
 
     return () => {
       active = false;
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
       if (watchId !== null && typeof window !== "undefined" && "geolocation" in navigator) {
         navigator.geolocation.clearWatch(watchId);
       }
@@ -815,6 +837,9 @@ export default function MapScreen() {
             activeDistrictName={viewingLocationName.toUpperCase()}
             countdownFormatted={countdown.remainingFormatted}
             focusCoords={[viewCenter.latitude, viewCenter.longitude]}
+            onCenterChange={(coords) => {
+              setViewCenter(coords);
+            }}
             userLocation={
               userLocation.coords
                 ? {

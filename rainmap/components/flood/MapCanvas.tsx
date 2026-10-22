@@ -203,6 +203,7 @@ type Props = {
   userLocation?: { latitude: number; longitude: number; accuracy?: number } | null;
   onMarker: (marker: MapMarker) => void;
   onMapPress: (point: GeoPoint) => void;
+  onCenterChange?: (point: GeoPoint) => void;
   pinMode: boolean;
 };
 
@@ -295,6 +296,7 @@ export function MapCanvas({
   userLocation,
   onMarker,
   onMapPress,
+  onCenterChange,
   pinMode,
 }: Props) {
   const windowDims = Dimensions.get("window");
@@ -328,13 +330,17 @@ export function MapCanvas({
     return () => loop.stop();
   }, [pulseAnim]);
 
-  // ── Focus coordinate jump ──
+  // ── Focus coordinate jump (only on actual coordinate changes, never on timer ticks) ──
+  const lastFocusRef = useRef<string>("");
   useEffect(() => {
-    if (focusCoords && focusCoords[0] && focusCoords[1]) {
-      setCenter({ latitude: focusCoords[0], longitude: focusCoords[1] });
-      setZoom((z) => Math.max(z, 7));
+    if (focusCoords && typeof focusCoords[0] === "number" && typeof focusCoords[1] === "number") {
+      const key = `${focusCoords[0].toFixed(3)},${focusCoords[1].toFixed(3)}`;
+      if (lastFocusRef.current !== key) {
+        lastFocusRef.current = key;
+        setCenter({ latitude: focusCoords[0], longitude: focusCoords[1] });
+      }
     }
-  }, [focusCoords]);
+  }, [focusCoords?.[0], focusCoords?.[1]]);
 
   const centerPx = useMemo(() => mercator(center.latitude, center.longitude, zoom), [center, zoom]);
 
@@ -344,19 +350,28 @@ export function MapCanvas({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponder: () => true,
         onStartShouldSetPanResponderCapture: () => false,
-        onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) + Math.abs(g.dy) > 4,
-        onMoveShouldSetPanResponderCapture: (_, g) => Math.abs(g.dx) + Math.abs(g.dy) > 4,
+        onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 3 || Math.abs(g.dy) > 3,
+        onMoveShouldSetPanResponderCapture: (_, g) => Math.abs(g.dx) > 3 || Math.abs(g.dy) > 3,
+        onPanResponderGrant: () => {
+          drag.setValue({ x: 0, y: 0 });
+        },
         onPanResponderMove: (_, g) => drag.setValue({ x: g.dx, y: g.dy }),
-        onPanResponderRelease: (_, g) => {
-          const next = unmercator(centerPx.x - g.dx, centerPx.y - g.dy, zoom);
-          setCenter(next);
+        onPanResponderRelease: (evt, g) => {
+          if (Math.abs(g.dx) < 6 && Math.abs(g.dy) < 6) {
+            const { locationX, locationY } = evt.nativeEvent;
+            onMapPress(toPoint(locationX, locationY));
+          } else {
+            const next = unmercator(centerPx.x - g.dx, centerPx.y - g.dy, zoom);
+            setCenter(next);
+            if (onCenterChange) onCenterChange(next);
+          }
           drag.setValue({ x: 0, y: 0 });
         },
         onPanResponderTerminate: () => drag.setValue({ x: 0, y: 0 }),
       }),
-    [centerPx, zoom, drag, size]
+    [centerPx, zoom, drag, size, onMapPress, onCenterChange]
   );
 
   // ── Tile generation from active basemap (supports multi-layer NASA/ISRO overlays) ──
@@ -487,14 +502,7 @@ export function MapCanvas({
             ))}
           </View>
 
-          {/* ── Tap Plane ── */}
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={(event) => {
-              const { locationX, locationY } = event.nativeEvent;
-              onMapPress(toPoint(locationX, locationY));
-            }}
-          />
+
 
           {/* ── SVG Vector Layers: Flood Plains, Rivers, Halos & Radar Rings ── */}
           {size.width > 0 && size.height > 0 ? (

@@ -1,11 +1,15 @@
 /**
  * Precision Location Detection & Reverse Geocoding Service
  *
- * Automatically detects the user's real location using:
- * 1. High-speed browser geolocation (HTML5 navigator.geolocation)
- * 2. Instant IP Geolocation fallback (ipwho.is / freeipapi) if browser GPS times out or is denied
- * 3. Dynamic reverse geocoding to resolve actual neighborhood & district names
+ * Automatically detects the user's authentic real-time location using:
+ * 1. Hardware GPS via expo-location (Foreground Permission & GPS Sensor)
+ * 2. High-speed browser geolocation (HTML5 navigator.geolocation) when running on web
+ * 3. IP Geolocation fallback (ipwho.is / freeipapi) if GPS permission is unavailable
+ * 4. Reverse geocoding to resolve genuine neighborhood & district names
  */
+
+import * as Location from "expo-location";
+import { Platform } from "react-native";
 
 export interface DetectedLocation {
   latitude: number;
@@ -17,7 +21,7 @@ export interface DetectedLocation {
   isGps: boolean;
 }
 
-// User's verified regional baseline (Chennai / Tamil Nadu)
+// User's default fallback location
 export const DEFAULT_FALLBACK_LOCATION: DetectedLocation = {
   latitude: 13.0878,
   longitude: 80.2785,
@@ -34,13 +38,13 @@ export const DEFAULT_FALLBACK_LOCATION: DetectedLocation = {
 export async function reverseGeocodeCoords(lat: number, lng: number): Promise<string> {
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
+    const timeout = setTimeout(() => controller.abort(), 4000);
 
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat.toFixed(5)}&lon=${lng.toFixed(5)}`,
       {
         signal: controller.signal,
-        headers: { "User-Agent": "MeteoGIS-EmergencyWatch/2.0" },
+        headers: { "User-Agent": "Loony-IMD-EmergencyMap/2.0" },
       }
     );
     clearTimeout(timeout);
@@ -50,10 +54,11 @@ export async function reverseGeocodeCoords(lat: number, lng: number): Promise<st
       const addr = data.address;
       if (addr) {
         const sub = addr.suburb || addr.neighbourhood || addr.residential || addr.road;
-        const city = addr.city || addr.town || addr.county || addr.state_district || "Chennai";
-        const state = addr.state || "Tamil Nadu";
+        const city = addr.city || addr.town || addr.county || addr.state_district;
+        const state = addr.state || "";
         if (sub && city) return `${sub}, ${city}`;
         if (city && state) return `${city}, ${state}`;
+        if (city) return city;
       }
       if (data.display_name) {
         const parts = data.display_name.split(",");
@@ -64,12 +69,11 @@ export async function reverseGeocodeCoords(lat: number, lng: number): Promise<st
     // Gracefully ignore and fallback
   }
 
-  // Coarse coordinate approximation
   return `${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E`;
 }
 
 /**
- * Fetches instant IP-based geolocation when browser GPS times out or is restricted
+ * Fetches IP-based geolocation when GPS is unavailable
  */
 export async function fetchIpLocation(): Promise<DetectedLocation | null> {
   try {
@@ -82,8 +86,8 @@ export async function fetchIpLocation(): Promise<DetectedLocation | null> {
     if (res.ok) {
       const data = await res.json();
       if (data.success !== false && data.latitude && data.longitude) {
-        const city = data.city || "Chennai";
-        const state = data.region || "Tamil Nadu";
+        const city = data.city || "Local Area";
+        const state = data.region || "India";
         return {
           latitude: Number(data.latitude),
           longitude: Number(data.longitude),
@@ -96,7 +100,6 @@ export async function fetchIpLocation(): Promise<DetectedLocation | null> {
       }
     }
   } catch {
-    // Try secondary free IP endpoint
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3500);
@@ -108,9 +111,9 @@ export async function fetchIpLocation(): Promise<DetectedLocation | null> {
           return {
             latitude: Number(d2.latitude),
             longitude: Number(d2.longitude),
-            localityName: `${d2.cityName || "Chennai"}, ${d2.regionName || "Tamil Nadu"}`,
-            district: d2.cityName || "Chennai",
-            state: d2.regionName || "Tamil Nadu",
+            localityName: `${d2.cityName || "Local Area"}, ${d2.regionName || "India"}`,
+            district: d2.cityName || "Local Area",
+            state: d2.regionName || "India",
             accuracyMeters: 500,
             isGps: false,
           };
@@ -124,17 +127,54 @@ export async function fetchIpLocation(): Promise<DetectedLocation | null> {
 }
 
 /**
- * Resolves the user's authentic location with high-speed dual fallback
+ * Resolves the user's authentic location using native Android GPS hardware via expo-location
  */
 export async function detectRealLocation(): Promise<DetectedLocation> {
-  // 1. Try HTML5 Geolocation with fast timeout first
+  // 1. Try Native Android / iOS GPS Hardware via expo-location
+  try {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status === "granted") {
+      const pos = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+
+      let locality = "";
+      try {
+        const rev = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+        if (rev && rev.length > 0) {
+          const item = rev[0];
+          const parts = [item.district || item.city || item.subregion, item.region].filter(Boolean);
+          locality = parts.join(", ");
+        }
+      } catch {}
+
+      if (!locality) {
+        locality = await reverseGeocodeCoords(lat, lng);
+      }
+
+      return {
+        latitude: lat,
+        longitude: lng,
+        localityName: locality || `${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E`,
+        district: locality.split(",")[0]?.trim() || "Current Location",
+        state: locality.split(",")[1]?.trim() || "India",
+        accuracyMeters: pos.coords.accuracy || 15,
+        isGps: true,
+      };
+    }
+  } catch {}
+
+  // 2. HTML5 Web Browser Geolocation fallback
   if (typeof window !== "undefined" && "geolocation" in navigator) {
     try {
       const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: false,
-          timeout: 4000,
-          maximumAge: 300000,
+          enableHighAccuracy: true,
+          timeout: 5000,
+          maximumAge: 60000,
         });
       });
 
@@ -146,22 +186,22 @@ export async function detectRealLocation(): Promise<DetectedLocation> {
         latitude: lat,
         longitude: lng,
         localityName: locality || `${lat.toFixed(4)}°N, ${lng.toFixed(4)}°E (GPS)`,
-        district: locality.split(",")[0] || "Local Area",
-        state: "Tamil Nadu",
+        district: locality.split(",")[0]?.trim() || "Current Location",
+        state: locality.split(",")[1]?.trim() || "India",
         accuracyMeters: pos.coords.accuracy || 20,
         isGps: true,
       };
     } catch {
-      // HTML5 GPS failed or timed out — seamlessly proceed to IP Geolocation
+      // HTML5 GPS failed or timed out
     }
   }
 
-  // 2. IP Geolocation Lookup
+  // 3. IP Geolocation Lookup
   const ipLoc = await fetchIpLocation();
   if (ipLoc) {
     return ipLoc;
   }
 
-  // 3. Fallback to confirmed base location
+  // 4. Default baseline
   return DEFAULT_FALLBACK_LOCATION;
 }

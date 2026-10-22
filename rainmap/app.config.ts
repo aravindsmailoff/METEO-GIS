@@ -84,7 +84,7 @@ const config: ExpoConfig = {
     },
     predictiveBackGestureEnabled: false,
     package: env.androidPackage,
-    permissions: ["POST_NOTIFICATIONS"],
+    permissions: ["POST_NOTIFICATIONS", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
     intentFilters: [
       {
         action: "VIEW",
