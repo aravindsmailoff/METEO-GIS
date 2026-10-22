@@ -314,7 +314,7 @@ const DEFAULT_KPIS: MeteoOverviewKpis = {
   reportingStationsCount: 42,
   highPrecipPoints: 6,
   activeStormCells: 4,
-  radarStation: "IMD DWR Coastal Doppler Network",
+  radarStation: "IMD Coastal Doppler Radar Network",
   soilSaturationIndex: 74,
 };
 
@@ -355,7 +355,7 @@ export const DEFAULT_AUTHORITATIVE_ALERTS: SevereWeatherAlert[] = [
     longitude: 88.502,
     issuedAt: "Live IMD 5m Synoptic Cycle",
     validUntil: "24h Forecast Cycle",
-    source: "India Meteorological Department (IMD) NWFC / DWR Radar",
+    source: "India Meteorological Department (IMD) NWFC",
     precautions: OFFICIAL_PRECAUTIONS.CLOUDBURST,
     rainfallMmH: 92.4,
     windSpeedKmh: 48,
@@ -450,7 +450,7 @@ export const DEFAULT_AUTHORITATIVE_ALERTS: SevereWeatherAlert[] = [
     longitude: 80.2707,
     issuedAt: "Live IMD 5m Synoptic Cycle",
     validUntil: "24h Forecast Cycle",
-    source: "IMD DWR Chennai Doppler Radar",
+    source: "IMD Chennai Doppler Radar",
     precautions: OFFICIAL_PRECAUTIONS.THUNDERSTORM,
     rainfallMmH: 34.5,
     windSpeedKmh: 40,
@@ -541,7 +541,7 @@ export function parseImdToSevereAlerts(rawHazards: any[], rawIncidents: any[]): 
         longitude: Number(h.longitude || 80.2707),
         issuedAt: h.issuedAtIST || "Today (IMD 5m Live Cycle)",
         validUntil: h.validUntilIST || "24h Forecast Cycle",
-        source: h.source || "India Meteorological Department (IMD) NWFC / DWR Radar",
+        source: h.source || "India Meteorological Department (IMD) NWFC",
         precautions: OFFICIAL_PRECAUTIONS[category] || OFFICIAL_PRECAUTIONS.THUNDERSTORM,
         rainfallMmH: h.rainfallRateMmH !== undefined ? Number(h.rainfallRateMmH) : category === "CLOUDBURST" ? 92 : category === "VERY_HEAVY_RAIN" ? 48 : 22,
         windSpeedKmh: h.windSpeedKmh !== undefined ? Number(h.windSpeedKmh) : category === "HIGH_WIND" ? 54 : 32,
@@ -735,10 +735,43 @@ export async function fetchLiveMeteoGis(lat: number = 13.0827, lng: number = 80.
     }
   } catch {
     // Graceful offline fallback
-    if (liveSevereAlerts.length === 0) {
-      liveSevereAlerts = [...DEFAULT_AUTHORITATIVE_ALERTS];
-      _cachedLiveAlerts = liveSevereAlerts;
-    }
+  }
+
+  // 1b. Direct IMD GeoServer WFS Ingestion (Runs directly on mobile device with zero backend requirement)
+  if (liveSevereAlerts.length === 0 || !isConnected) {
+    try {
+      const { getDirectUnifiedHazards } = await import("./imdDirectService");
+      const directHazards = await getDirectUnifiedHazards();
+      if (directHazards && directHazards.length > 0) {
+        liveSevereAlerts = directHazards.map((dh) => ({
+          id: dh.id,
+          category: dh.category,
+          severity: dh.severity,
+          headline: dh.headline,
+          district: dh.district,
+          state: dh.state,
+          latitude: dh.latitude,
+          longitude: dh.longitude,
+          issuedAt: dh.issuedAt,
+          validUntil: dh.validUntil,
+          source: dh.source,
+          precautions: dh.precautions,
+          rainfallMmH: dh.rainfallMmH,
+          windSpeedKmh: dh.windSpeedKmh,
+          windDirectionDeg: dh.windDirectionDeg,
+          windCardinal: dh.windCardinal,
+          radarEchoDbz: dh.radarEchoDbz,
+        }));
+        _cachedLiveAlerts = liveSevereAlerts;
+        kpis.activeWarningsCount = liveSevereAlerts.length;
+        isConnected = true;
+      }
+    } catch {}
+  }
+
+  if (liveSevereAlerts.length === 0) {
+    liveSevereAlerts = [...DEFAULT_AUTHORITATIVE_ALERTS];
+    _cachedLiveAlerts = liveSevereAlerts;
   }
 
   // 2. Fetch fresh Open-Meteo synoptic surface observations to guarantee live wind & temperature

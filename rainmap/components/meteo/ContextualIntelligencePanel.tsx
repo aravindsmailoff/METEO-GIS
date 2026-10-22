@@ -80,58 +80,37 @@ export function ContextualIntelligencePanel({ currentZone, zoneIndex, onClose }:
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollBody}>
         {activeTab === "overview" ? (
           <>
-            {/* Kokonut UI: 4-Card 2x2 Bento Metric Grid with Live Sparklines */}
-            <View style={styles.metricsGrid}>
-              <KokonutBentoMetricCard
-                label="TEMPERATURE"
-                value={currentZone.tempC}
-                unit="°C"
-                subtext="ISRO / NASA Satellite"
-                icon="thermometer-outline"
-                accentColor="#F59E0B"
-                sparklineData={[26, 27, 28, 27.5, 29, 29.5, 30, currentZone.tempC]}
-              />
-              <KokonutBentoMetricCard
-                label="HUMIDITY"
-                value={currentZone.humidityPercent}
-                unit="%"
-                subtext="INSAT-3DR Sounder"
-                icon="water-outline"
-                accentColor="#38BDF8"
-                sparklineData={[68, 70, 72, 75, 73, 71, 74, currentZone.humidityPercent]}
-              />
-              <KokonutBentoMetricCard
-                label="RAINFALL (1H)"
-                value={currentZone.rain1hMm}
-                unit="mm"
-                subtext={currentZone.rain1hMm === 0 ? "0.0 mm (Dry / Nil)" : "Active Precipit."}
-                icon="rainy-outline"
-                accentColor="#60A5FA"
-                sparklineData={[0, 0, 0.2, 0.5, 0.1, 0, currentZone.rain1hMm]}
-              />
-              <KokonutBentoMetricCard
-                label="WIND"
-                value={currentZone.windSpeedKmh}
-                unit="km/h"
-                subtext="NASA GEOS Stream"
-                icon="navigate-outline"
-                accentColor="#34D399"
-                sparklineData={[10, 12, 14, 18, 16, 15, currentZone.windSpeedKmh]}
-              />
-            </View>
-
-            {/* Dedicated Large LED Countdown Card (Watermelon Glow Card) */}
-            <WatermelonGlowCard glowColor="#F59E0B" style={styles.countdownCard}>
+            {/* 1. Doppler Nowcast Validity Countdown Card - DISPLAYED FIRST AT TOP */}
+            <WatermelonGlowCard
+              glowColor={currentZone.severity === "RED" ? "#EF4444" : currentZone.severity === "ORANGE" ? "#F97316" : "#F59E0B"}
+              urgent={currentZone.severity === "RED" || currentZone.severity === "ORANGE"}
+              style={styles.countdownCard}
+            >
               <View style={styles.countdownCardHeader}>
                 <View style={styles.countdownCardTitleRow}>
-                  <View style={styles.pulsingYellowDot} />
+                  <View style={[styles.pulsingYellowDot, currentZone.severity === "RED" && { backgroundColor: "#EF4444" }]} />
                   <Text style={styles.countdownCardTitle}>DOPPLER NOWCAST VALIDITY COUNTDOWN</Text>
                 </View>
-                <View style={styles.cardStormBadge}>
-                  <Ionicons name="flash" size={10} color="#F59E0B" />
-                  <Text style={styles.cardStormBadgeText}>STORM ALERT</Text>
+                <View style={[
+                  styles.cardStormBadge,
+                  currentZone.severity === "RED" && { backgroundColor: "rgba(239, 68, 68, 0.2)", borderColor: "rgba(239, 68, 68, 0.4)" }
+                ]}>
+                  <Ionicons name="flash" size={10} color={currentZone.severity === "RED" ? "#EF4444" : "#F59E0B"} />
+                  <Text style={[styles.cardStormBadgeText, currentZone.severity === "RED" && { color: "#EF4444" }]}>
+                    {currentZone.badgeLabel || "STORM ALERT"}
+                  </Text>
                 </View>
               </View>
+
+              {/* Active Warning Headline Banner */}
+              {currentZone.headline ? (
+                <View style={styles.countdownHeadlineBox}>
+                  <Ionicons name="warning" size={13} color="#F59E0B" />
+                  <Text numberOfLines={2} style={styles.countdownHeadlineText}>
+                    {currentZone.headline}
+                  </Text>
+                </View>
+              ) : null}
 
               {/* LED Blocks: Hours : Mins : Secs */}
               <View style={styles.ledDisplay}>
@@ -165,6 +144,46 @@ export function ContextualIntelligencePanel({ currentZone, zoneIndex, onClose }:
                 </Text>
               </View>
             </WatermelonGlowCard>
+
+            {/* 2. Kokonut UI: 4-Card 2x2 Bento Metric Grid - PLACED BELOW THE TIMER */}
+            <View style={styles.metricsGrid}>
+              <KokonutBentoMetricCard
+                label="TEMPERATURE"
+                value={currentZone.tempC}
+                unit="°C"
+                subtext="ISRO / NASA Satellite"
+                icon="thermometer-outline"
+                accentColor="#F59E0B"
+                sparklineData={[26, 27, 28, 27.5, 29, 29.5, 30, currentZone.tempC]}
+              />
+              <KokonutBentoMetricCard
+                label="HUMIDITY"
+                value={currentZone.humidityPercent}
+                unit="%"
+                subtext="Atmospheric Sounder"
+                icon="water-outline"
+                accentColor="#38BDF8"
+                sparklineData={[68, 70, 72, 75, 73, 71, 74, currentZone.humidityPercent]}
+              />
+              <KokonutBentoMetricCard
+                label="RAINFALL (1H)"
+                value={currentZone.rain1hMm}
+                unit="mm"
+                subtext={currentZone.rain1hMm === 0 ? "0.0 mm (Dry / Nil)" : "Active Precipit."}
+                icon="rainy-outline"
+                accentColor="#60A5FA"
+                sparklineData={[0, 0, 0.2, 0.5, 0.1, 0, currentZone.rain1hMm]}
+              />
+              <KokonutBentoMetricCard
+                label="WIND"
+                value={currentZone.windSpeedKmh}
+                unit="km/h"
+                subtext="NASA GEOS Stream"
+                icon="navigate-outline"
+                accentColor="#34D399"
+                sparklineData={[10, 12, 14, 18, 16, 15, currentZone.windSpeedKmh]}
+              />
+            </View>
           </>
         ) : (
           /* Warnings / Details Tab */
@@ -556,6 +575,26 @@ const styles = StyleSheet.create({
   metaValue: {
     color: "rgba(255, 255, 255, 0.85)",
     fontWeight: "600",
+    fontFamily: SF_PRO,
+  },
+  countdownHeadlineBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(245, 158, 11, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(245, 158, 11, 0.3)",
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginBottom: 12,
+  },
+  countdownHeadlineText: {
+    flex: 1,
+    color: "#F59E0B",
+    fontSize: 11,
+    fontWeight: "700",
+    lineHeight: 15,
     fontFamily: SF_PRO,
   },
 });

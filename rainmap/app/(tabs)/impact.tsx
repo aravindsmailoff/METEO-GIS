@@ -38,7 +38,7 @@ export default function ImpactScreen() {
     reportingStationsCount: 42,
     highPrecipPoints: 6,
     activeStormCells: 4,
-    radarStation: "IMD DWR Coastal Radar Network",
+    radarStation: "National Doppler Radar Network",
     soilSaturationIndex: 74,
   });
   const [nearestRescue, setNearestRescue] = useState<RescueUnit>(() => findNearestRescueUnit(13.0827, 80.2707));

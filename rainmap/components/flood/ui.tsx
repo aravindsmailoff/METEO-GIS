@@ -91,7 +91,7 @@ export function GradientSurface({
 }
 
 export function LiveFeedBadge({ label }: { label?: string }) {
-  const displayLabel = label || "LIVE IMD AWS & ISRO BHUVAN TELEMETRY ACTIVE";
+  const displayLabel = label || "LIVE IMD AWS & NASA POWER TELEMETRY ACTIVE";
   return (
     <View accessibilityLabel={displayLabel} style={styles.demoBadge}>
       <View style={styles.demoDot} />

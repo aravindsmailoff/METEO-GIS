@@ -88,7 +88,7 @@ const en = {
   sampleReading: "Live CWC / WRD Telemetry",
   deviceLocalReports: "Verified sector reports",
   sampleOnly: "Census Spatial Buffer",
-  prototypeWarning: "Live Multi-Hazard Early Warning Network · IMD AWS, DWR & ISRO Bhuvan Connected.",
+  prototypeWarning: "Live Multi-Hazard Early Warning Network · IMD Surface Stations & Satellite Connected.",
   notForecast: "Telemetry aggregated from IMD Automatic Weather Stations, Doppler Radar, and NASA GPM.",
   reservoirWatchTitle: "Major Catchments & Reservoir Watch",
   exampleOnly: "LIVE TELEMETRY",

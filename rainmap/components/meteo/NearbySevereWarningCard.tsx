@@ -3,6 +3,7 @@ import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-nativ
 import { Ionicons } from "@expo/vector-icons";
 import { SF_PRO } from "../flood/ui";
 import type { MonitoringRadiusKm, SevereWeatherAlert } from "@/lib/flood/types";
+import { getCountdownTime } from "@/lib/meteo/meteoGisData";
 import {
   WatermelonGlowCard,
   WatermelonShimmerBadge,
@@ -37,6 +38,14 @@ export function NearbySevereWarningCard({
   const [precautionsExpanded, setPrecautionsExpanded] = useState(false);
   const [shimmerAnim] = useState(() => new Animated.Value(0));
   const [beaconPulse] = useState(() => new Animated.Value(0));
+  const [countdown, setCountdown] = useState(() => getCountdownTime(6.0, 0));
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCountdown(getCountdownTime(6.0, 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const shimmer = Animated.loop(
@@ -193,7 +202,35 @@ export function NearbySevereWarningCard({
             Impact Sector: {alert.district}, {alert.state}
           </Text>
 
-          {/* Telemetry Metrics Row (Rainfall & Wind) */}
+          {/* Doppler / Weather Warning Validity Countdown Timer FIRST */}
+          <View style={styles.alertCountdownCard}>
+            <View style={styles.countdownCardHeader}>
+              <View style={styles.countdownCardTitleRow}>
+                <View style={[styles.pulsingDot, { backgroundColor: sev.bg }]} />
+                <Text style={styles.countdownCardTitle}>NOWCAST VALIDITY COUNTDOWN</Text>
+              </View>
+              <Text style={[styles.validWindowText, { color: sev.bg }]}>Active Warning Cycle</Text>
+            </View>
+
+            <View style={styles.alertLedDisplay}>
+              <View style={styles.alertLedBlock}>
+                <Text style={styles.alertLedDigits}>{countdown.hrs}</Text>
+                <Text style={styles.alertLedLabel}>HRS</Text>
+              </View>
+              <Text style={[styles.alertLedColon, { color: sev.bg }]}>:</Text>
+              <View style={styles.alertLedBlock}>
+                <Text style={styles.alertLedDigits}>{countdown.mins}</Text>
+                <Text style={styles.alertLedLabel}>MIN</Text>
+              </View>
+              <Text style={[styles.alertLedColon, { color: sev.bg }]}>:</Text>
+              <View style={styles.alertLedBlock}>
+                <Text style={styles.alertLedDigits}>{countdown.secs}</Text>
+                <Text style={styles.alertLedLabel}>SEC</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Telemetry Metrics Row (Rainfall & Wind) - PLACED BELOW THE TIMER */}
           <View style={styles.telemetryRow}>
             {alert.rainfallMmH ? (
               <View style={styles.telemetryChip}>
@@ -297,7 +334,7 @@ export function NearbySevereWarningCard({
             </View>
           ) : null}
           <WatermelonShimmerBadge
-            label="DWR RADAR & SATELLITE SURVEILLANCE ACTIVE"
+            label="METEOROLOGICAL RADAR & SATELLITE SURVEILLANCE ACTIVE"
             color="#10B981"
           />
         </WatermelonGlowCard>
@@ -630,6 +667,82 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.7)",
     fontSize: 9.5,
     fontWeight: "600",
+    fontFamily: SF_PRO,
+  },
+  alertCountdownCard: {
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    borderRadius: 12,
+    padding: 10,
+    marginTop: 2,
+    marginBottom: 4,
+  },
+  countdownCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+  countdownCardTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  pulsingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  countdownCardTitle: {
+    color: "rgba(255, 255, 255, 0.8)",
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    fontFamily: SF_PRO,
+  },
+  validWindowText: {
+    fontSize: 9,
+    fontWeight: "700",
+    fontFamily: SF_PRO,
+    letterSpacing: 0.3,
+  },
+  alertLedDisplay: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  alertLedBlock: {
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.14)",
+    borderRadius: 8,
+    width: 54,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  alertLedDigits: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontFamily: SF_PRO,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    fontVariant: ["tabular-nums"],
+  },
+  alertLedLabel: {
+    color: "rgba(255, 255, 255, 0.45)",
+    fontSize: 7.5,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+    marginTop: 1,
+    fontFamily: SF_PRO,
+  },
+  alertLedColon: {
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 8,
     fontFamily: SF_PRO,
   },
 });

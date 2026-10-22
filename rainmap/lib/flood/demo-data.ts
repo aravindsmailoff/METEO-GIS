@@ -2,7 +2,7 @@ import type { MapMarker, ReservoirDemo, RiskLevel } from "./types";
 
 export const CHENNAI_CENTER = { latitude: 13.0827, longitude: 80.2707 };
 
-export const DEMO_NOTICE = "REAL-TIME IMD AWS, DWR & ISRO BHUVAN TELEMETRY ACTIVE";
+export const DEMO_NOTICE = "REAL-TIME METEOROLOGICAL & SATELLITE TELEMETRY ACTIVE";
 
 export const LOCALITIES = [
   "Chennai",

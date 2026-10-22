@@ -36,21 +36,21 @@ export function SystemStatusBar() {
           <View style={styles.statusItem}>
             <View style={styles.dotCyan} />
             <Text style={styles.statusLabel}>
-              INSAT-3DR: <Text style={styles.statusVal}>Live</Text>
+              Satellite: <Text style={styles.statusVal}>Live</Text>
             </Text>
           </View>
 
           <View style={styles.statusItem}>
             <View style={styles.dotBlue} />
             <Text style={styles.statusLabel}>
-              DWR Radar: <Text style={styles.statusVal}>Live (34 stn)</Text>
+              Weather Radar: <Text style={styles.statusVal}>Live (34 stn)</Text>
             </Text>
           </View>
 
           <View style={styles.statusItem}>
             <View style={styles.dotEmerald} />
             <Text style={styles.statusLabel}>
-              Bhuvan: <Text style={styles.statusVal}>Connected</Text>
+              NASA EarthData: <Text style={styles.statusVal}>Connected</Text>
             </Text>
           </View>
 

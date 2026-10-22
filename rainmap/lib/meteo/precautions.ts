@@ -35,4 +35,10 @@ export const OFFICIAL_PRECAUTIONS: Record<SevereWeatherAlert["category"], string
     "Listen for unusual sounds like trees cracking or boulders knocking.",
     "Evacuate vulnerable slope corridors during prolonged downpours.",
   ],
+  CYCLONE: [
+    "Stay tuned to official IMD Doppler bulletins and local administration sirens.",
+    "Stock essential supplies: drinking water, non-perishable food, and first-aid kits.",
+    "Remain strictly indoors during the calm 'eye' of the cyclone as violent winds will reverse.",
+    "Do not venture into sea or coastal zones until official all-clear is issued.",
+  ],
 };

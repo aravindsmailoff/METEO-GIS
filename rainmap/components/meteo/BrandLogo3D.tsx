@@ -18,7 +18,7 @@ export function BrandLogo3D({ compact = false }: Props) {
       {/* ── Apple Typography & Status Pill ── */}
       <View style={styles.textColumn}>
         <View style={styles.titleRow}>
-          <Text style={styles.brandTitle}>RainMap</Text>
+          <Text style={styles.brandTitle}>MeteoGIS</Text>
           <View style={styles.appleLivePill}>
             <View style={styles.pulseDot} />
             <Text style={styles.appleLiveText}>LIVE</Text>
@@ -27,7 +27,7 @@ export function BrandLogo3D({ compact = false }: Props) {
 
         {!compact ? (
           <Text numberOfLines={1} style={styles.brandSub}>
-            Satellite & Severe Weather Telemetry
+            National Meteorological Intelligence
           </Text>
         ) : null}
       </View>

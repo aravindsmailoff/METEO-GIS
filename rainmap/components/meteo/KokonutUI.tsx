@@ -77,7 +77,7 @@ export function KokonutStatusIsland({
     label: "IMD Doppler Radar",
     detail: "Real-time Telemetry Live",
     status: "synced",
-    source: "IMD AWS & DWR",
+    source: "IMD Weather Network",
   };
 
   return (

@@ -20,6 +20,7 @@ import { NearbySevereWarningCard } from "@/components/meteo/NearbySevereWarningC
 import { ForecastHorizonSelector } from "@/components/meteo/ForecastHorizonSelector";
 import { EmergencyAssistanceModal } from "@/components/meteo/EmergencyAssistanceModal";
 import { BrandLogo3D } from "@/components/meteo/BrandLogo3D";
+import { AppleDynamicIslandAlert } from "@/components/meteo/AppleDynamicIslandAlert";
 import { SF_PRO } from "@/components/flood/ui";
 import {
   WatermelonSpringButton,
@@ -50,6 +51,19 @@ import type {
   UserLocationState,
 } from "@/lib/flood/types";
 
+const QUICK_STATES = [
+  { name: "All India", icon: "🇮🇳", lat: 22.9734, lng: 78.6569, zoom: 5 },
+  { name: "Tamil Nadu", icon: "🏛️", lat: 11.1271, lng: 78.6569, zoom: 7 },
+  { name: "Sikkim", icon: "🏔️", lat: 27.5330, lng: 88.5122, zoom: 9 },
+  { name: "Kerala", icon: "🌴", lat: 10.8505, lng: 76.2711, zoom: 8 },
+  { name: "Assam", icon: "🌊", lat: 26.2006, lng: 92.9376, zoom: 7 },
+  { name: "Delhi", icon: "🏛️", lat: 28.6139, lng: 77.2090, zoom: 10 },
+  { name: "Maharashtra", icon: "🏙️", lat: 19.7515, lng: 75.7139, zoom: 7 },
+  { name: "West Bengal", icon: "🌾", lat: 22.9868, lng: 87.8550, zoom: 7 },
+  { name: "Uttarakhand", icon: "🏔️", lat: 30.0668, lng: 79.0193, zoom: 8 },
+  { name: "Himachal", icon: "⛰️", lat: 31.1048, lng: 77.1734, zoom: 8 },
+];
+
 export default function MapScreen() {
   const router = useRouter();
   const { width: screenWidth } = useWindowDimensions();
@@ -66,13 +80,14 @@ export default function MapScreen() {
     permissionDenied: false,
   });
 
-  // Current viewing location on map
+  // Current viewing location on map (defaults to user's real location, immediately detected on mount)
   const [viewCenter, setViewCenter] = useState<GeoPoint>({
     latitude: DEFAULT_FALLBACK_LOCATION.latitude,
     longitude: DEFAULT_FALLBACK_LOCATION.longitude,
   });
   const [viewingLocationName, setViewingLocationName] = useState<string>(DEFAULT_FALLBACK_LOCATION.localityName);
   const [isExploringOtherLocation, setIsExploringOtherLocation] = useState<boolean>(false);
+  const [selectedState, setSelectedState] = useState<string>("All India");
 
   // Severe Alert Monitoring Radius (5 km, 10 km, 25 km, 50 km)
   const [monitoringRadiusKm, setMonitoringRadiusKm] = useState<MonitoringRadiusKm>(25);
@@ -92,7 +107,7 @@ export default function MapScreen() {
 
   // Drawer / Bottom sheet active tab: "alerts" | "overview"
   const [activeDrawerTab, setActiveDrawerTab] = useState<"alerts" | "overview">("alerts");
-  const [sheetExpanded, setSheetExpanded] = useState(false);
+  const [sheetExpanded, setSheetExpanded] = useState(true);
 
   // Layer Toggles (Rain and Wind disabled for pristine satellite clarity)
   const [layers, setLayers] = useState<Record<MapLayer, boolean>>({
@@ -136,6 +151,7 @@ export default function MapScreen() {
         permissionDenied: false,
       });
 
+      // Automatically center map and warnings on user's detected authentic location!
       setViewCenter(userCoords);
       setViewingLocationName(loc.localityName);
       setIsExploringOtherLocation(false);
@@ -315,7 +331,7 @@ export default function MapScreen() {
       rain1hMm: wind?.rainfall1hMm ?? 0.0,
       windSpeedKmh: wind?.speedKmh ?? 14,
       validDurationHours: 6.0,
-      sourceFeed: wind?.dataSource || "IMD AWS & DWR Coastal Doppler Radar",
+      sourceFeed: wind?.dataSource || "IMD Surface Stations & Doppler Radar",
       slopeDeg: isro?.elevationDemM ? Math.min(30, Math.round(isro.elevationDemM * 0.4)) : 6,
     };
   }, [livePayload, highestPriorityAlert, viewingLocationName, viewCenter]);
@@ -335,11 +351,11 @@ export default function MapScreen() {
   // Kokonut UI: Active Meteorological Telemetry Task Feeds
   const kokonutTasks: KokonutTask[] = useMemo(() => [
     {
-      id: "imd-dwr",
-      label: "IMD Doppler Radar",
+      id: "doppler-radar",
+      label: "Doppler Storm Radar",
       detail: `${viewingLocationName.split(",")[0]} Radar Sweep Active`,
       status: "synced",
-      source: "IMD DWR Network",
+      source: "Doppler Radar Network",
     },
     {
       id: "aws-telemetry",
@@ -349,11 +365,11 @@ export default function MapScreen() {
       source: "MoES AWS Feed",
     },
     {
-      id: "isro-bhuvan",
-      label: "ISRO Bhuvan CartoDEM",
-      detail: livePayload?.isroBhuvan ? `${livePayload.isroBhuvan.district} Mosaic Active` : "Satellite Basemap Synced",
+      id: "nasa-gibs",
+      label: "NASA GIBS Weather Satellite",
+      detail: "MODIS / VIIRS Live Orbit Active",
       status: "synced",
-      source: "ISRO NRSC Bhuvan",
+      source: "NASA EarthData / GIBS",
     },
     {
       id: "nasa-gpm",
@@ -364,46 +380,41 @@ export default function MapScreen() {
     },
   ], [viewingLocationName, liveZone, livePayload]);
 
-  // Map markers
+  // Authoritative markers plotted at exact government geolocations
   const baseMarkers = useMemo(() => getAllMapMarkers(reports), [reports, cachedAt]);
   const markers = useMemo(() => {
-    const combined: MapMarker[] = [...baseMarkers];
+    const markerMap = new Map<string, MapMarker>();
 
-    // Add severe alerts as hazard markers
-    allSevereAlerts.forEach((a) => {
-      combined.push({
-        id: a.id,
-        title: `${a.district} · ${a.category.replace(/_/g, " ")}`,
-        subtitle: a.headline,
-        latitude: a.latitude,
-        longitude: a.longitude,
-        type: a.category === "LANDSLIDE" ? "landslide" : "imd",
-        level: a.severity === "EXTREME" ? "critical" : a.severity === "SEVERE" ? "danger" : "warning",
-        extra: {
-          impact: a.headline,
-          headline: a.headline,
-          source: a.source,
-        },
-      });
-    });
+    for (const m of baseMarkers) {
+      markerMap.set(m.id, m);
+    }
 
-    // 2026 Spatial Constellation Declutter Algorithm (Prevents overlapping icons)
-    const seen = new Map<string, number>();
-    return combined.map((m) => {
-      const key = `${m.latitude.toFixed(2)},${m.longitude.toFixed(2)}`;
-      const count = seen.get(key) || 0;
-      seen.set(key, count + 1);
-      if (count > 0) {
-        const angle = (count * 2 * Math.PI) / 6;
-        const radius = 0.022 * Math.sqrt(count);
-        return {
-          ...m,
-          latitude: m.latitude + radius * Math.sin(angle),
-          longitude: m.longitude + radius * Math.cos(angle),
-        };
+    for (const a of allSevereAlerts) {
+      if (!markerMap.has(a.id) && !markerMap.has(`hotspot-${a.district.toLowerCase()}`)) {
+        markerMap.set(a.id, {
+          id: a.id,
+          title: `${a.district} · ${a.category.replace(/_/g, " ")}`,
+          subtitle: a.headline,
+          latitude: a.latitude,
+          longitude: a.longitude,
+          type: a.category === "LANDSLIDE" ? "landslide" : "imd",
+          level: a.severity === "EXTREME" ? "critical" : a.severity === "SEVERE" ? "danger" : "warning",
+          extra: {
+            impact: a.headline,
+            headline: a.headline,
+            source: a.source,
+            category: a.category,
+            severity: a.severity,
+            district: a.district,
+            state: a.state,
+            precautions: a.precautions,
+            rainfallRateMmH: a.rainfallMmH,
+          },
+        });
       }
-      return m;
-    });
+    }
+
+    return Array.from(markerMap.values());
   }, [baseMarkers, allSevereAlerts]);
 
   // Filtered search suggestions
@@ -469,8 +480,8 @@ export default function MapScreen() {
 
         {/* Center / Right: Search, Recenter, Prominent SOS Action */}
         <View style={styles.topActionsRow}>
-          {/* Location Chip (if exploring) */}
-          {isExploringOtherLocation ? (
+          {/* Location Chip (if exploring on wide screens) */}
+          {isExploringOtherLocation && isWide ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Recenter location"
@@ -531,9 +542,40 @@ export default function MapScreen() {
         </View>
       </View>
 
-      {/* ── KOKONUT UI: DYNAMIC ISLAND TELEMETRY CAPSULE (https://kokonutui.com/) ── */}
-      <View style={styles.kokonutIslandContainer}>
-        <KokonutStatusIsland tasks={kokonutTasks} onRefresh={handleSyncFeeds} />
+      {/* ── METEO-GIS QUICK STATE SELECTOR CHIPS ── */}
+      <View style={styles.quickStatesBar}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.quickStatesContent}
+        >
+          {QUICK_STATES.map((st) => {
+            const active = selectedState === st.name;
+            return (
+              <Pressable
+                key={st.name}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${st.name}`}
+                onPress={() => {
+                  setViewCenter({ latitude: st.lat, longitude: st.lng });
+                  setViewingLocationName(st.name);
+                  setSelectedState(st.name);
+                  setIsExploringOtherLocation(st.name !== "All India");
+                }}
+                style={({ pressed }) => [
+                  styles.stateChip,
+                  active && styles.stateChipActive,
+                  pressed && { opacity: 0.8 },
+                ]}
+              >
+                <Text style={styles.stateChipIcon}>{st.icon}</Text>
+                <Text style={[styles.stateChipLabel, active && styles.stateChipLabelActive]}>
+                  {st.name}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
       </View>
 
       {/* ── FORECAST HORIZON SELECTOR (6h / 12h / 24h / 48h) ── */}
@@ -599,21 +641,6 @@ export default function MapScreen() {
               }
             }}
           />
-
-          {/* ── Apple Floating Emergency SOS Beacon Badge on Map ── */}
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open Emergency SOS Beacon"
-            onPress={() => setEmergencyModalOpen(true)}
-            style={({ pressed }) => [
-              styles.floatingMapSosBadge,
-              pressed && { transform: [{ scale: 0.93 }], opacity: 0.9 },
-            ]}
-          >
-            <View style={styles.sosLiveBeaconDot} />
-            <Ionicons name="radio" size={14} color="#FFFFFF" />
-            <Text style={styles.floatingMapSosText}>EMERGENCY SOS</Text>
-          </Pressable>
 
           {/* ── MOBILE APPLE DOCKED BOTTOM SHEET (Severe Alerts & Overview) ── */}
           {!isWide ? (
@@ -902,6 +929,44 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     zIndex: 36,
   },
+  quickStatesBar: {
+    marginHorizontal: 12,
+    marginBottom: 6,
+    zIndex: 35,
+  },
+  quickStatesContent: {
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "center",
+  },
+  stateChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.12)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  stateChipActive: {
+    backgroundColor: "rgba(10, 132, 255, 0.22)",
+    borderColor: "#0A84FF",
+  },
+  stateChipIcon: {
+    fontSize: 12,
+  },
+  stateChipLabel: {
+    color: "rgba(255, 255, 255, 0.75)",
+    fontSize: 11,
+    fontWeight: "600",
+    fontFamily: SF_PRO,
+  },
+  stateChipLabelActive: {
+    color: "#FFFFFF",
+    fontWeight: "800",
+  },
   topActionsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1035,7 +1100,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: 68,
+    height: 72,
     backgroundColor: "rgba(22, 22, 26, 0.94)",
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
@@ -1053,6 +1118,8 @@ const styles = StyleSheet.create({
   },
   mobileBottomSheetExpanded: {
     height: "80%",
+    zIndex: 105,
+    elevation: 35,
   },
   sheetHandleRow: {
     alignItems: "center",

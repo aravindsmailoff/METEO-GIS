@@ -16,7 +16,7 @@ export function getMeteoBackendUrl(): string {
   }
 
   if (Platform.OS === "web") {
-    return "http://localhost:3000";
+    return "http://localhost:3001";
   }
 
   // 2. Physical device automatic LAN IP detection during Expo development
@@ -28,17 +28,17 @@ export function getMeteoBackendUrl(): string {
   if (hostUri) {
     const ip = hostUri.split(":")[0];
     if (ip && ip !== "localhost" && ip !== "127.0.0.1") {
-      return `http://${ip}:3000`;
+      return `http://${ip}:3001`;
     }
   }
 
   // 3. Android LAN fallback
   if (Platform.OS === "android") {
     const lanUrl = process.env.EXPO_PUBLIC_METEO_GIS_LAN_URL;
-    return lanUrl ? lanUrl.replace(/\/+$/, "") : "http://10.0.2.2:3000";
+    return lanUrl ? lanUrl.replace(/\/+$/, "") : "http://10.0.2.2:3001";
   }
 
-  return "http://localhost:3000";
+  return "http://localhost:3001";
 }
 
 export interface BackendHazardsResponse {

@@ -22,7 +22,7 @@ export default function AreaScreen() {
     reportingStationsCount: 42,
     highPrecipPoints: 6,
     activeStormCells: 4,
-    radarStation: "IMD DWR Coastal Radar Network",
+    radarStation: "National Doppler Radar Network",
     soilSaturationIndex: 74,
   });
 

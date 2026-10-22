@@ -11,7 +11,7 @@ import { ReactBitsBackground } from "@/components/meteo/ReactBitsBackground";
 import React, { useState } from "react";
 import { EmergencyAssistanceModal } from "@/components/meteo/EmergencyAssistanceModal";
 
-function GlassFloatingTabBar({ state, descriptors, navigation }: any) {
+function DockedBottomTabBar({ state, descriptors, navigation }: any) {
   const insets = useSafeAreaInsets();
   const { language } = useFlood();
   const [sosModalOpen, setSosModalOpen] = useState(false);
@@ -34,8 +34,10 @@ function GlassFloatingTabBar({ state, descriptors, navigation }: any) {
     <>
       <View
         style={[
-          styles.floatingBarContainer,
-          { bottom: Platform.OS === "web" ? 14 : Math.max(insets.bottom, 12) },
+          styles.dockedBarContainer,
+          {
+            paddingBottom: Platform.OS === "web" ? 8 : Math.max(insets.bottom, 6),
+          },
         ]}
       >
         {state.routes.map((route: any, index: number) => {
@@ -73,7 +75,7 @@ function GlassFloatingTabBar({ state, descriptors, navigation }: any) {
                   ]}
                 >
                   <View style={styles.centerSosBeaconDot} />
-                  <Ionicons name="warning" size={16} color="#FFFFFF" />
+                  <Ionicons name="warning" size={15} color="#FFFFFF" />
                   <Text style={styles.centerSosLabel}>SOS</Text>
                 </Pressable>
               ) : null}
@@ -92,7 +94,7 @@ function GlassFloatingTabBar({ state, descriptors, navigation }: any) {
                 <View style={styles.iconContainer}>
                   <Ionicons
                     name={isFocused ? meta.iconActive : meta.iconInactive}
-                    size={18}
+                    size={19}
                     color={isFocused ? "#0A84FF" : "rgba(255, 255, 255, 0.45)"}
                   />
                 </View>
@@ -119,7 +121,7 @@ function CitizenTabs() {
     <View style={styles.rootLayout}>
       <ReactBitsBackground />
       <Tabs
-        tabBar={(props) => <GlassFloatingTabBar {...props} />}
+        tabBar={(props) => <DockedBottomTabBar {...props} />}
         screenOptions={{
           headerShown: false,
           animation: "fade",
@@ -150,61 +152,44 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000000",
   },
-  floatingBarContainer: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: "rgba(28, 28, 30, 0.88)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.12)",
+  dockedBarContainer: {
+    width: "100%",
+    backgroundColor: "#0B0F19",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.10)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-around",
     paddingHorizontal: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 24,
-    elevation: 25,
+    paddingTop: 6,
     zIndex: 99,
-    overflow: "hidden",
     ...(Platform.OS === "web"
       ? ({
-          backdropFilter: "blur(28px) saturate(180%)",
-          WebkitBackdropFilter: "blur(28px) saturate(180%)",
-          boxShadow:
-            "0 12px 36px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.22)",
+          boxShadow: "0 -4px 20px rgba(0, 0, 0, 0.6)",
         } as any)
-      : {}),
+      : {
+          elevation: 16,
+        }),
   },
   tabButton: {
     flex: 1,
-    height: 52,
+    height: 48,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 24,
-    paddingVertical: 4,
-    marginHorizontal: 3,
+    borderRadius: 12,
+    paddingVertical: 2,
+    marginHorizontal: 2,
     position: "relative",
   },
   tabButtonActive: {
-    backgroundColor: "rgba(255, 255, 255, 0.12)",
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.18)",
-    ...(Platform.OS === "web"
-      ? ({
-          boxShadow: "0 2px 8px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.2)",
-        } as any)
-      : {}),
+    backgroundColor: "rgba(255, 255, 255, 0.08)",
   },
   tabButtonPressed: {
     transform: [{ scale: 0.94 }],
     opacity: 0.82,
   },
   iconContainer: {
-    height: 20,
+    height: 22,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -221,7 +206,7 @@ const styles = StyleSheet.create({
   },
   tabGlowPip: {
     position: "absolute",
-    bottom: 3,
+    bottom: 1,
     width: 4,
     height: 4,
     borderRadius: 2,
@@ -233,37 +218,37 @@ const styles = StyleSheet.create({
       : {}),
   },
   centerSosTabBtn: {
-    height: 52,
-    paddingHorizontal: 12,
-    borderRadius: 24,
-    backgroundColor: "#FF453A",
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: "#FF3B30",
     borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.4)",
+    borderColor: "rgba(255, 255, 255, 0.5)",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
     marginHorizontal: 4,
-    shadowColor: "#FF453A",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.6,
-    shadowRadius: 10,
-    elevation: 10,
+    shadowColor: "#FF3B30",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.7,
+    shadowRadius: 8,
+    elevation: 8,
     ...(Platform.OS === "web"
       ? ({
-          boxShadow: "0 4px 16px rgba(255, 69, 58, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.4)",
+          boxShadow: "0 4px 16px rgba(255, 59, 48, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.45)",
         } as any)
       : {}),
   },
   centerSosBeaconDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
     backgroundColor: "#FFFFFF",
-    marginBottom: 2,
+    marginBottom: 1,
   },
   centerSosLabel: {
     color: "#FFFFFF",
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: "900",
     letterSpacing: 0.5,
     fontFamily: SF_PRO,

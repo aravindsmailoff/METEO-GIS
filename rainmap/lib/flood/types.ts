@@ -56,7 +56,7 @@ export type MonitoringRadiusKm = 5 | 10 | 25 | 50;
 
 export interface SevereWeatherAlert {
   id: string;
-  category: "THUNDERSTORM" | "HAILSTORM" | "CLOUDBURST" | "VERY_HEAVY_RAIN" | "LIGHTNING" | "HIGH_WIND" | "LANDSLIDE";
+  category: "THUNDERSTORM" | "HAILSTORM" | "CLOUDBURST" | "VERY_HEAVY_RAIN" | "LIGHTNING" | "HIGH_WIND" | "LANDSLIDE" | "CYCLONE";
   severity: "EXTREME" | "SEVERE" | "MODERATE" | "INFORMATION";
   headline: string;
   district: string;
