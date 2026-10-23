@@ -4,7 +4,7 @@
 version: '3.8'
 
 services:
-  # 1. PostGIS Database
+  # 1. PostGIS Database (Authoritative Disaster State & Spatial Infrastructure)
   postgis:
     image: postgis/postgis:16-3.4
     container_name: antigravity_postgis
@@ -16,7 +16,7 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - postgis_data:/var/lib/postgresql/data
-      - ./backend/models:/docker-entrypoint-initdb.d:ro
+      - ./landslide/backend/models:/docker-entrypoint-initdb.d:ro
     ports:
       - "5432:5432"
     networks:
@@ -27,7 +27,7 @@ services:
       timeout: 5s
       retries: 5
 
-  # 2. Valhalla Tile Builder
+  # 2. Valhalla Tile Builder (Official Valhalla image for offline NER graph generation)
   valhalla-builder:
     image: ghcr.io/valhalla/valhalla:latest
     container_name: antigravity_valhalla_builder
@@ -38,15 +38,15 @@ services:
       BUILD_CONCURRENCY: 2
     volumes:
       - valhalla_data:/data
-      - ./scripts:/scripts:ro
+      - ./landslide/scripts:/scripts:ro
     entrypoint: ["/bin/bash", "/scripts/build_tiles.sh"]
     networks:
       - antigravity_net
 
-  # 3. FastAPI Backend with pyvalhalla
+  # 3. FastAPI Backend (AI Hazard Predictor, PostGIS State, pyvalhalla Disaster Routing)
   backend:
     build:
-      context: ./backend
+      context: ./landslide/backend
       dockerfile: Dockerfile
     container_name: antigravity_backend
     restart: unless-stopped
@@ -59,7 +59,7 @@ services:
       SYSTEM_MODE: LIVE
     volumes:
       - valhalla_data:/data:ro
-      - ./backend:/app
+      - ./landslide/backend:/app
     ports:
       - "8000:8000"
     networks:
@@ -68,6 +68,22 @@ services:
       resources:
         limits:
           memory: 1200M
+
+  # 4. Next.js Web GIS Frontend (MapLibre / Leaflet Disaster Command Center)
+  frontend:
+    build:
+      context: ./landslide
+      dockerfile: Dockerfile
+    container_name: antigravity_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    networks:
+      - antigravity_net
 
 volumes:
   postgis_data:

@@ -35,7 +35,7 @@ const env = {
   logoUrl: "https://files.manuscdn.com/user_upload_by_module/session_file/310519663897581569/HBsrVGPvLmavWHst.png",
   scheme: schemeFromBundleId,
   iosBundleId: bundleId,
-  androidPackage: bundleId,
+  androidPackage: "com.simats.Loony",
 };
 
 // Expo serializes this browser-safe subset into native and web bundles. The server-only

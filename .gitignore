@@ -1,37 +1,43 @@
 # Dependencies
 node_modules/
+**/node_modules/
 /.pnp
 .pnp.js
 
 # Build and Production
 .next/
+**/.next/
 /out/
-build
-dist
+build/
+**/build/
+dist/
+**/dist/
 
 # Native Android artifacts, local SDK config & signing keys (never commit secrets/keystores)
-*.apk
-*.aab
 *.keystore
 *.jks
 local.properties
-!android/android/gradle/wrapper/gradle-wrapper.jar
-!android/android/gradlew
-!android/android/gradlew.bat
+!**/gradle-wrapper.jar
+!**/gradlew
+!**/gradlew.bat
 
 # Environment variables & Tokens
 .env
+**/.env
 .env*.local
+**/.env*.local
 .imd_token.json
+**/.imd_token.json
 
 # TypeScript cache
 *.tsbuildinfo
+**/*.tsbuildinfo
 
 # Python cache
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *$py.class
-*.env
 .venv/
 venv/
 
@@ -43,9 +49,11 @@ yarn-debug.log*
 yarn-error.log*
 .idea/
 .vscode/
+~$*
 
 # Sandbox & Scratch files
 scratch/
+**/scratch/
 .freebuff/
 .tempmediaStorage/
 __v0_runtime_loader.js
@@ -55,3 +63,8 @@ __v0_jsx-dev-runtime.ts
 .v0-trash/
 .vercel/
 .expo/
+**/.expo/
+
+# Git backups
+landslide_git_backup/
+*.git_backup/

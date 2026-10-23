@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account & Data Deletion - Loony</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b1120;
+      --card-bg: #131d33;
+      --accent: #ef4444;
+      --accent-glow: rgba(239, 68, 68, 0.15);
+      --primary: #38bdf8;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --border: #1e293b;
+      --card-border: #233554;
+      --input-bg: #0b1120;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 48px;
+      box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+    }
+    .header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 24px;
+      margin-bottom: 32px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #f87171;
+      background: var(--accent-glow);
+      border-radius: 9999px;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    h1 {
+      font-size: 2.2rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 8px;
+    }
+    .meta {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+    h2 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      color: var(--primary);
+      margin-top: 32px;
+      margin-bottom: 14px;
+    }
+    p, ul, ol {
+      color: #cbd5e1;
+      font-size: 1rem;
+      margin-bottom: 16px;
+    }
+    ol, ul {
+      padding-left: 24px;
+    }
+    li {
+      margin-bottom: 10px;
+    }
+    strong {
+      color: #ffffff;
+    }
+    .callout {
+      background: rgba(239, 68, 68, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin: 24px 0;
+    }
+    .callout p {
+      margin-bottom: 0;
+      color: #fca5a5;
+    }
+    .card-box {
+      background: #0d1527;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-top: 24px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    input, textarea {
+      width: 100%;
+      background: var(--input-bg);
+      border: 1px solid var(--card-border);
+      color: #fff;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-family: inherit;
+    }
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    button {
+      background: #dc2626;
+      color: #fff;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.95rem;
+      transition: background 0.2s ease;
+    }
+    button:hover {
+      background: #b91c1c;
+    }
+    .footer {
+      border-top: 1px solid var(--border);
+      margin-top: 48px;
+      padding-top: 24px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+    a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+    @media (max-width: 640px) {
+      .container {
+        padding: 24px;
+      }
+      h1 {
+        font-size: 1.7rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span class="badge">Google Play Data Safety</span>
+      <h1>Request Account & Data Deletion</h1>
+      <p class="meta"><strong>Application:</strong> Loony</p>
+    </div>
+
+    <p>In compliance with Google Play Store policies and data protection standards, users of <strong>Loony</strong> have full autonomy over their personal data and account records.</p>
+
+    <div class="callout">
+      <p><strong>Warning:</strong> Account and data deletion is irreversible. Once processed, your saved preferences, hazard pins, and profile details will be permanently removed.</p>
+    </div>
+
+    <h2>Option 1: In-App Account Deletion</h2>
+    <p>You can instantly delete your account directly inside the mobile app:</p>
+    <ol>
+      <li>Open the <strong>Loony</strong> app on your device.</li>
+      <li>Tap your <strong>Profile / Settings</strong> icon in the navigation drawer or top bar.</li>
+      <li>Scroll down to the <strong>Account & Security</strong> section.</li>
+      <li>Tap <strong>Delete Account & Data</strong>.</li>
+      <li>Confirm your decision. All associated records will be immediately purged.</li>
+    </ol>
+
+    <h2>Option 2: Web-Based Deletion Request</h2>
+    <p>If you have uninstalled the app or cannot access your device, submit your deletion request below. Our support team will process your request within <strong>7 business days</strong>.</p>
+
+    <div class="card-box">
+      <form onsubmit="handleDeletionSubmit(event)">
+        <div class="form-group">
+          <label for="userEmail">Your Registered Email Address / Phone Number</label>
+          <input type="text" id="userEmail" required placeholder="e.g. user@example.com">
+        </div>
+
+        <div class="form-group">
+          <label for="reason">Additional Notes (Optional)</label>
+          <textarea id="reason" rows="3" placeholder="Optional notes for our team"></textarea>
+        </div>
+
+        <button type="submit">Submit Deletion Request</button>
+      </form>
+      <div id="confirmation" style="display:none; margin-top: 16px; color: #4ade80; font-weight: 500;">
+        ✓ Your request has been drafted. If your mail client didn't open automatically, please send an email directly to <a href="mailto:aravindsmailoff@gmail.com?subject=Loony Account Deletion Request">aravindsmailoff@gmail.com</a>.
+      </div>
+    </div>
+
+    <h2>What Data Is Deleted?</h2>
+    <ul>
+      <li><strong>User Profile & Authentication Data:</strong> Email, username, and authentication tokens.</li>
+      <li><strong>Saved Locations:</strong> Custom pinned areas, bookmarked infrastructure, or evacuation points.</li>
+      <li><strong>Submitted Reports:</strong> Any user-submitted road/landslide reports will be untracked and decoupled from your personal identity.</li>
+      <li><strong>Notification Tokens:</strong> Push notification device tokens registered on our server.</li>
+    </ul>
+
+    <h2>What Data Is Retained?</h2>
+    <p>No personal identifying data is retained after deletion. Fully anonymized, aggregated meteorological and spatial usage metrics (which cannot be linked back to any individual) may be maintained for statistical GIS accuracy.</p>
+
+    <h2>Support Contact</h2>
+    <p>For urgent requests or inquiries regarding data removal, you can reach out directly:</p>
+    <p>
+      <strong>Developer / Maintainer:</strong> Aravind (Loony Support)<br>
+      <strong>Email:</strong> <a href="mailto:aravindsmailoff@gmail.com?subject=Loony Data Deletion Request">aravindsmailoff@gmail.com</a><br>
+      <strong>GitHub Repository:</strong> <a href="https://github.com/aravindsmailoff/METEO-GIS" target="_blank" rel="noopener">github.com/aravindsmailoff/METEO-GIS</a><br>
+      <strong>Response Time:</strong> Within 24-48 hours
+    </p>
+
+    <div class="footer">
+      <p>&copy; 2026 Loony. All rights reserved.</p>
+      <p style="margin-top: 6px;"><a href="./privacy-policy.html">Return to Privacy Policy</a></p>
+    </div>
+  </div>
+
+  <script>
+    function handleDeletionSubmit(e) {
+      e.preventDefault();
+      const identifier = document.getElementById('userEmail').value;
+      const reason = document.getElementById('reason').value;
+      const subject = encodeURIComponent("Loony Account Deletion Request - " + identifier);
+      const body = encodeURIComponent(
+        "Hello Loony Support Team,\n\n" +
+        "I request the permanent deletion of my account and all associated personal data from Loony.\n\n" +
+        "Registered Identifier: " + identifier + "\n" +
+        "Notes: " + (reason || "None") + "\n\n" +
+        "Thank you."
+      );
+      window.location.href = "mailto:aravindsmailoff@gmail.com?subject=" + subject + "&body=" + body;
+      document.getElementById('confirmation').style.display = 'block';
+    }
+  </script>
+</body>
+</html>
